@@ -4,34 +4,32 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { QueryClientProvider } from "@tanstack/solid-query"
 import { createMemo, For, type ParentProps, Show } from "solid-js"
 import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
+import { useGlobal } from "@/context/global"
 import { ModelsProvider } from "@/context/models"
 import { ServerConnection } from "@/context/server"
 import { ServerSDKProvider } from "@/context/server-sdk"
 import { ServerSyncProvider } from "@/context/server-sync"
-import { useGlobal } from "@/context/global"
 import { useSettings } from "@/context/settings"
 
 export function SettingsServerScope(props: ParentProps) {
   const global = useGlobal()
   const settings = useSettings()
-
   return (
     <Show when={settings.general.newLayoutDesigns()} fallback={props.children}>
-      <Show when={global.settings.server.selected()}>
-        {(server) => <SettingsServerDataProviders server={server()}>{props.children}</SettingsServerDataProviders>}
+      <Show when={global.settings.server.selected()} keyed>
+        {(server) => <SettingsServerDataScope server={server}>{props.children}</SettingsServerDataScope>}
       </Show>
     </Show>
   )
 }
 
-function SettingsServerDataProviders(props: ParentProps<{ server: ServerConnection.Any }>) {
+export function SettingsServerDataScope(props: ParentProps<{ server: ServerConnection.Any }>) {
   const global = useGlobal()
   const serverCtx = () => global.ensureServerCtx(props.server)
-
   return (
     <QueryClientProvider client={serverCtx().queryClient}>
       <ServerSDKProvider server={() => props.server}>
-        <ServerSyncProvider>
+        <ServerSyncProvider server={() => props.server}>
           <ModelsProvider>{props.children}</ModelsProvider>
         </ServerSyncProvider>
       </ServerSDKProvider>

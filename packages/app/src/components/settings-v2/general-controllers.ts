@@ -1,9 +1,6 @@
-import { createMemo, createResource, onMount, type Accessor } from "solid-js"
+import { createMemo, createResource, onCleanup, onMount, type Accessor } from "solid-js"
 import type { ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useTheme } from "@opencode-ai/ui/theme/context"
-import { usePermission } from "@/context/permission"
-import { useServerSDK } from "@/context/server-sdk"
-import { useServerSync } from "@/context/server-sync"
 import {
   monoDefault,
   monoFontFamily,
@@ -17,51 +14,48 @@ import {
   useSettings,
 } from "@/context/settings"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
-import { createSoundPreviewController, type ShellOption } from "./general-controller-behavior"
+import { useServerSync } from "@/context/server-sync"
 
-export { createShellOptions, createSoundPreviewController } from "./general-controller-behavior"
-export type { ShellOption, ShellSelectOption } from "./general-controller-behavior"
+type ShellOption = {
+  path: string
+  name: string
+  acceptable: boolean
+}
 
-export function createPermissionScopeController(sessionID: Accessor<string | undefined>) {
-  const permission = usePermission()
-  const serverSync = useServerSync()
-  const directory = createMemo(() => {
-    const id = sessionID()
-    if (!id) return undefined
-    return serverSync().session.lineage.peek(id)?.session.directory
-  })
+type ShellSelectOption = {
+  id: string
+  value: string
+  name: string
+  terminalOnly: boolean
+}
 
-  return {
-    accepting: createMemo(() => {
-      const id = sessionID()
-      const dir = directory()
-      if (!id || !dir) return false
-      return permission.isAutoAccepting(id, dir)
+export function createShellOptions(input: { shells: ShellOption[]; current: string | undefined }) {
+  const counts = input.shells.reduce((result, shell) => {
+    result.set(shell.name, (result.get(shell.name) ?? 0) + 1)
+    return result
+  }, new Map<string, number>())
+  const options: ShellSelectOption[] = [
+    { id: "auto", value: "", name: "", terminalOnly: false },
+    ...input.shells.map((shell) => {
+      const ambiguous = (counts.get(shell.name) ?? 0) > 1
+      return {
+        id: shell.path,
+        value: ambiguous ? shell.path : shell.name,
+        name: ambiguous ? shell.path : shell.name,
+        terminalOnly: !shell.acceptable,
+      }
     }),
-    enabled: createMemo(() => !!directory()),
-    set: (checked: boolean) => {
-      const id = sessionID()
-      const dir = directory()
-      if (!id || !dir) return
-      if (checked) return permission.enableAutoAccept(id, dir)
-      permission.disableAutoAccept(id, dir)
-    },
+  ]
+  if (input.current && !options.some((option) => option.value === input.current)) {
+    options.push({ id: input.current, value: input.current, name: input.current, terminalOnly: false })
   }
+  return options
 }
 
 export function createShellSettingsController() {
-  const serverSdk = useServerSDK()
   const serverSync = useServerSync()
-  const [shells] = createResource(
-    async () => {
-      const sdk = serverSdk()
-      if ((await sdk.protocol) === "v1") return (await sdk.client.pty.shells()).data ?? []
-      return [] as ShellOption[]
-    },
-    { initialValue: [] as ShellOption[] },
-  )
+  const [shells] = createResource(async () => [] as ShellOption[], { initialValue: [] as ShellOption[] })
   const current = createMemo(() => serverSync().data.config.shell ?? "")
-
   return {
     shells: () => shells.latest,
     current,
@@ -76,9 +70,7 @@ export function createAppearanceSettingsController() {
   const settings = useSettings()
   const theme = useTheme()
   const themes = createMemo(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
-
   onMount(() => void theme.loadThemes())
-
   return {
     scheme: {
       current: theme.colorScheme,
@@ -118,7 +110,7 @@ export type SoundSelectOption = (typeof soundOptions)[number]
 
 export function createSoundSettingsController() {
   const settings = useSettings()
-  const preview = createSoundPreviewController(playSoundById)
+  const preview = soundPreview()
   const channel = (
     enabled: Accessor<boolean>,
     current: Accessor<string>,
@@ -144,30 +136,57 @@ export function createSoundSettingsController() {
       preview.play(option.id)
     },
   })
-
   return {
     agent: channel(
       settings.sounds.agentEnabled,
       settings.sounds.agent,
-      (value) => settings.sounds.setAgentEnabled(value),
-      (id) => settings.sounds.setAgent(id),
+      settings.sounds.setAgentEnabled,
+      settings.sounds.setAgent,
     ),
     permissions: channel(
       settings.sounds.permissionsEnabled,
       settings.sounds.permissions,
-      (value) => settings.sounds.setPermissionsEnabled(value),
-      (id) => settings.sounds.setPermissions(id),
+      settings.sounds.setPermissionsEnabled,
+      settings.sounds.setPermissions,
     ),
     errors: channel(
       settings.sounds.errorsEnabled,
       settings.sounds.errors,
-      (value) => settings.sounds.setErrorsEnabled(value),
-      (id) => settings.sounds.setErrors(id),
+      settings.sounds.setErrorsEnabled,
+      settings.sounds.setErrors,
     ),
   }
 }
 
-export type PermissionScopeController = ReturnType<typeof createPermissionScopeController>
-export type ShellSettingsController = ReturnType<typeof createShellSettingsController>
+function soundPreview() {
+  const state = {
+    cleanup: undefined as (() => void) | undefined,
+    timeout: undefined as NodeJS.Timeout | undefined,
+    run: 0,
+  }
+  const stop = () => {
+    state.run += 1
+    state.cleanup?.()
+    clearTimeout(state.timeout)
+    state.cleanup = undefined
+  }
+  const play = (id: string | undefined) => {
+    stop()
+    if (!id) return
+    const run = ++state.run
+    state.timeout = setTimeout(() => {
+      void playSoundById(id).then((cleanup) => {
+        if (state.run !== run) {
+          cleanup?.()
+          return
+        }
+        state.cleanup = cleanup
+      })
+    }, 100)
+  }
+  onCleanup(stop)
+  return { play, stop }
+}
+
 export type AppearanceSettingsController = ReturnType<typeof createAppearanceSettingsController>
 export type SoundSettingsController = ReturnType<typeof createSoundSettingsController>

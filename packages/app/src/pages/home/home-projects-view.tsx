@@ -45,8 +45,9 @@ export type HomeProjectsViewProps = {
   onChooseProject: (server: ServerConnection.Any) => void
   onFocusServer: (server: ServerConnection.Any) => void
   onToggleCollapsed: (server: ServerConnection.Any) => void
-  onEditServer: (server: ServerConnection.Http) => void
+  onEditServer: (server: ServerConnection.Any) => void
   onSetDefaultServer: (server: ServerConnection.Any | undefined) => void
+  canRemoveServer: (server: ServerConnection.Any) => boolean
   onRemoveServer: (server: ServerConnection.Any) => void
   onMoveProject: (server: ServerConnection.Any, worktree: string, index: number) => void
   onSelectProject: (server: ServerConnection.Any, directory: string) => void
@@ -192,6 +193,7 @@ function HomeServerRow(props: {
   onToggleCollapsed: HomeProjectsViewProps["onToggleCollapsed"]
   onEditServer: HomeProjectsViewProps["onEditServer"]
   onSetDefaultServer: HomeProjectsViewProps["onSetDefaultServer"]
+  canRemoveServer: HomeProjectsViewProps["canRemoveServer"]
   onRemoveServer: HomeProjectsViewProps["onRemoveServer"]
   onSetContextMenuOpen: HomeProjectsContextMenuProps["onSetContextMenuOpen"]
   onChooseProject: HomeProjectsViewProps["onChooseProject"]
@@ -277,6 +279,7 @@ function HomeServerRow(props: {
           labels={serverMenuLabels(props.language)}
           canDefault={props.canDefaultServer()}
           isDefault={props.defaultServerKey() === ServerConnection.key(props.server)}
+          canRemove={props.canRemoveServer(props.server)}
           onEdit={props.onEditServer}
           onSetDefault={() => props.onSetDefaultServer(props.server)}
           onRemoveDefault={() => props.onSetDefaultServer(undefined)}
@@ -475,10 +478,6 @@ function HomeProjectRow(
       ref={sortable.ref}
       class="group/project relative flex h-7 min-w-0 items-center rounded-[6px]"
       classList={{ "z-10": sortable.isDragSource() }}
-      onContextMenu={(event) => {
-        event.preventDefault()
-        props.onSetContextMenuOpen(contextMenuID(), true)
-      }}
     >
       <HomeProjectNavButton
         type="button"
@@ -486,6 +485,7 @@ function HomeProjectRow(
         class="pr-16 disabled:opacity-60"
         classList={{
           "bg-v2-background-bg-layer-01 text-v2-text-text-base": sortable.isDragSource(),
+          "[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)]": sortable.isDragSource(),
         }}
         data-selected={props.selected ? "" : undefined}
         aria-current={props.selected ? "page" : undefined}
@@ -593,9 +593,9 @@ function HomeProjectNavButton(props: JSX.ButtonHTMLAttributes<HTMLButtonElement>
       class={`
         flex h-7 min-w-0 w-full shrink-0 cursor-default items-center gap-2 rounded-[6px] bg-transparent px-1.5 text-left
         text-v2-text-text-muted [font-weight:440] transition-[background-color,color,box-shadow] duration-[120ms] ease-in-out
-        hover:bg-v2-background-bg-layer-01 hover:text-v2-text-text-base
+        hover:bg-v2-background-bg-layer-01 hover:text-v2-text-text-base hover:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)]
         data-[selected]:bg-v2-background-bg-layer-03 data-[selected]:text-v2-text-text-base
-        data-[selected]:hover:bg-v2-background-bg-layer-03
+        data-[selected]:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)] data-[selected]:hover:bg-v2-background-bg-layer-03
         focus-visible:bg-v2-background-bg-layer-01 focus-visible:text-v2-text-text-base focus-visible:outline-none
         focus-visible:[box-shadow:inset_0_0_0_0.5px_var(--v2-border-border-muted)]
         ${local.class ?? ""}

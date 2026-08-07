@@ -9,7 +9,7 @@ import { ServerConnection } from "@/context/server"
 export const ServerRowMenu: Component<{
   server: ServerConnection.Any
   controller: ReturnType<typeof useServerManagementController>
-  onEdit: (server: ServerConnection.Http) => void
+  onEdit: (server: ServerConnection.Any) => void
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }> = (props) => {
@@ -21,6 +21,7 @@ export const ServerRowMenu: Component<{
       labels={serverMenuLabels(language)}
       canDefault={props.controller.canDefault()}
       isDefault={props.controller.defaultKey() === key}
+      canRemove={!ServerConnection.builtin(props.server)}
       onEdit={props.onEdit}
       onSetDefault={() => props.controller.setDefault(key)}
       onRemoveDefault={() => props.controller.setDefault(null)}
@@ -47,15 +48,14 @@ export const ServerRowMenuView: Component<{
   labels: ReturnType<typeof serverMenuLabels>
   canDefault: boolean
   isDefault: boolean
-  onEdit: (server: ServerConnection.Http) => void
+  canRemove: boolean
+  onEdit: (server: ServerConnection.Any) => void
   onSetDefault: () => void
   onRemoveDefault: () => void
   onRemove: () => void
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }> = (props) => {
-  const builtin = () => ServerConnection.builtin(props.server)
-  const httpServer = () => (props.server.type === "http" ? props.server : undefined)
   return (
     <MenuV2 gutter={6} modal={false} placement="bottom-end" open={props.open} onOpenChange={props.onOpenChange}>
       <MenuV2.Trigger
@@ -69,25 +69,17 @@ export const ServerRowMenuView: Component<{
         <MenuV2.Content>
           <MenuV2.Group>
             <MenuV2.GroupLabel>{props.labels.server}</MenuV2.GroupLabel>
-            <MenuV2.Item
-              disabled={builtin() || !httpServer()}
-              onSelect={() => {
-                const server = httpServer()
-                if (server) props.onEdit(server)
-              }}
-            >
-              {props.labels.edit}
-            </MenuV2.Item>
+            <MenuV2.Item onSelect={() => props.onEdit(props.server)}>{props.labels.edit}</MenuV2.Item>
             <Show when={props.canDefault && !props.isDefault}>
               <MenuV2.Item onSelect={props.onSetDefault}>{props.labels.default}</MenuV2.Item>
             </Show>
             <Show when={props.canDefault && props.isDefault}>
               <MenuV2.Item onSelect={props.onRemoveDefault}>{props.labels.defaultRemove}</MenuV2.Item>
             </Show>
-            <MenuV2.Separator />
-            <MenuV2.Item disabled={builtin()} onSelect={props.onRemove}>
-              {props.labels.delete}
-            </MenuV2.Item>
+            <Show when={props.canRemove}>
+              <MenuV2.Separator />
+              <MenuV2.Item onSelect={props.onRemove}>{props.labels.delete}</MenuV2.Item>
+            </Show>
           </MenuV2.Group>
         </MenuV2.Content>
       </MenuV2.Portal>
