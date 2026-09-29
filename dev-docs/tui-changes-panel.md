@@ -52,6 +52,15 @@ reported status; the panel shows "No diff available for this change." for it. On
 Selection and expansion live in the plugin memory store (`context.storage.memory("state")`), shared between the sidebar and
 the panel and surviving hot reloads. Prompts default expanded, steps default collapsed.
 
+## Presentation
+
+Tiers are distinguished by the **categorical** palette (`theme.categorical[level][300]`), by semantic role rather than
+literal color: prompt → `[0]`, step → `[1]`, change/file and the panel's "Diff" label → `[2]`, panel's "Reasoning" label →
+`[3]`. Step status uses `text.feedback` (`success`/`warning`/`error`, which are genuine outcome states); file A/M/D marks
+and `+/-` counts use the `diff` tokens; the Undo action uses `text.action.destructive`. The detail panel has a thin
+`border.base` left edge, 1-row `border.base` separators between its header, diff, and reasoning sections, and a colored
+`▍` accent on the file name. Per `packages/tui/AGENTS.md`, no unrelated token is repurposed.
+
 ## Panel reuse
 
 The V2 panel infrastructure (`context/panel.tsx`, `component/panel-host.tsx`, the `session.panel` slot) already existed

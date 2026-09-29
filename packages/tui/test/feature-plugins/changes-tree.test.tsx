@@ -39,6 +39,8 @@ function context() {
       text: { base: color, muted: color, feedback: { error: feedback, warning: feedback, success: feedback } },
       background: { raised: { base: color, high: color, max: color } },
       diff: { text: { added: color, removed: color } },
+      categorical: [{ 300: color }],
+      border: { base: color },
     },
     data: { session: { message: { list: () => messages } } },
     ui: { panel: { open: () => true } },

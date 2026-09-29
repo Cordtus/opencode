@@ -33,6 +33,17 @@ function statusMark(status: "running" | "error" | "done") {
   return "✓"
 }
 
+function levelColor(theme: Plugin.Context["theme"], index: number) {
+  const colors = theme.categorical
+  return colors[index % colors.length]?.[300] ?? theme.text.base
+}
+
+function statusColor(theme: Plugin.Context["theme"], status: "running" | "error" | "done") {
+  if (status === "error") return theme.text.feedback.error.base
+  if (status === "running") return theme.text.feedback.warning.base
+  return theme.text.feedback.success.base
+}
+
 /**
  * Accumulates `deriveHistory` output into durable storage. Debounced because reasoning
  * streams token-by-token; the union-merge means evicted messages stay in the tree.
@@ -131,7 +142,7 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
 
   return (
     <Show when={prompts().length > 0}>
-      <box>
+      <box gap={1}>
         <text fg={theme().text.base}>
           <b>Changes</b>
         </text>
@@ -141,26 +152,29 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
             return (
               <box>
                 <box flexDirection="row" gap={1} onMouseDown={() => toggle(prompt().id, true)}>
-                  <text flexShrink={0} fg={theme().text.muted}>
+                  <text flexShrink={0} fg={levelColor(theme(), 0)}>
                     {promptExpanded() ? "▼" : "▶"}
                   </text>
-                  <text flexGrow={1} wrapMode="word" fg={theme().text.muted}>
+                  <text flexGrow={1} wrapMode="word" fg={levelColor(theme(), 0)}>
                     <b>{prompt().label}</b>
                   </text>
                 </box>
                 <Show when={promptExpanded()}>
-                  <box paddingLeft={1}>
+                  <box paddingLeft={2}>
                     <Index each={prompt().steps}>
                       {(step) => {
                         const stepExpanded = () => memory.expanded[step().id] ?? false
                         return (
                           <box>
                             <box flexDirection="row" gap={1} onMouseDown={() => toggle(step().id, false)}>
-                              <text flexShrink={0} fg={theme().text.muted}>
+                              <text flexShrink={0} fg={levelColor(theme(), 1)}>
                                 {stepExpanded() ? "▼" : "▶"}
                               </text>
-                              <text flexGrow={1} wrapMode="word" fg={theme().text.base}>
-                                [{statusMark(step().status)}] {step().label}
+                              <text flexShrink={0} fg={statusColor(theme(), step().status)}>
+                                [{statusMark(step().status)}]
+                              </text>
+                              <text flexGrow={1} wrapMode="word" fg={levelColor(theme(), 1)}>
+                                {step().label}
                               </text>
                             </box>
                             <Show when={stepExpanded()}>
@@ -185,7 +199,7 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
                                         <text
                                           flexGrow={1}
                                           wrapMode="word"
-                                          fg={selected(change().id) ? theme().text.base : theme().text.muted}
+                                          fg={selected(change().id) ? theme().text.base : levelColor(theme(), 2)}
                                         >
                                           {change().file}
                                         </text>
@@ -275,7 +289,17 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
   }
 
   return (
-    <box flexGrow={1} minWidth={0} flexDirection="column">
+    <box
+      flexGrow={1}
+      minWidth={0}
+      flexDirection="column"
+      border={["left"]}
+      borderColor={theme().border.base}
+      paddingLeft={2}
+      paddingRight={2}
+      paddingTop={1}
+      paddingBottom={1}
+    >
       <Show
         when={current()}
         fallback={
@@ -285,6 +309,9 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
         {(value) => (
           <>
             <box flexDirection="row" gap={1} flexShrink={0}>
+              <text flexShrink={0} fg={levelColor(theme(), 2)}>
+                ▍
+              </text>
               <text fg={theme().text.base}>
                 <b>{value().change.file}</b>
               </text>
@@ -305,6 +332,13 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
               </box>
             </box>
 
+            <box height={1} flexShrink={0} backgroundColor={theme().border.base} />
+
+            <box flexShrink={0} paddingTop={1}>
+              <text fg={levelColor(theme(), 2)}>
+                <b>Diff</b>
+              </text>
+            </box>
             <box flexGrow={1} flexBasis={0} minHeight={0}>
               <scrollbox flexGrow={1} minHeight={0} horizontalScrollbarOptions={{ visible: false }}>
                 <Show
@@ -337,8 +371,9 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
               </scrollbox>
             </box>
 
+            <box height={1} flexShrink={0} backgroundColor={theme().border.base} />
             <box flexShrink={0} paddingTop={1}>
-              <text fg={theme().text.muted}>
+              <text fg={levelColor(theme(), 3)}>
                 <b>Reasoning</b>
               </text>
             </box>
