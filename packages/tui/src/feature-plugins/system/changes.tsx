@@ -1,21 +1,24 @@
 import { Plugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
-import { createMemo, createSignal, Index, Show } from "solid-js"
+import { createMemo, Index, Show } from "solid-js"
 import { useThemes } from "../../context/theme"
 import { PatchDiff } from "../../component/patch-diff"
 import { filetype } from "../../util/filetype"
+import { errorMessage } from "../../util/error"
 import type { SessionMessageInfo } from "@opencode/client"
 import { deriveSteps, type SessionChange } from "./changes-model"
 
-// Selection is client-local UI state shared by the sidebar task tree and the panel.
-// It includes the session so it cannot leak across sessions in one TUI process.
 type Selection = { sessionID: string; changeID: string }
 
-const [expanded, setExpanded] = createSignal<Readonly<Record<string, boolean>>>({})
-const [selection, setSelection] = createSignal<Selection>()
+// Client-local UI state shared by the sidebar tree and the panel. The plugin memory
+// store keeps both views in sync and survives plugin hot reloads.
+type ChangesMemory = { expanded: Record<string, boolean>; selection?: Selection }
 
-function toggle(stepID: string) {
-  setExpanded((current) => ({ ...current, [stepID]: !(current[stepID] ?? false) }))
+function changeMark(status: SessionChange["status"]) {
+  if (status === "added") return "A"
+  if (status === "deleted") return "D"
+  if (status === "modified") return "M"
+  return "•"
 }
 
 function statusMark(status: "running" | "error" | "done") {
@@ -24,23 +27,22 @@ function statusMark(status: "running" | "error" | "done") {
   return "✓"
 }
 
-function resolve(messages: SessionMessageInfo[], sessionID: string) {
-  const current = selection()
-  if (!current || current.sessionID !== sessionID) return
-  for (const step of deriveSteps(messages)) {
-    const change = step.changes.find((item) => item.id === current.changeID)
-    if (change) return { step, change }
-  }
-  return
-}
-
 export function TaskTree(props: { context: Plugin.Context; sessionID: string }) {
   const theme = () => props.context.theme
   const messages = createMemo(() => props.context.data.session.message.list(props.sessionID))
   const steps = createMemo(() => deriveSteps(messages()))
+  const [memory, updateMemory] = props.context.storage.memory<ChangesMemory>("state", { initial: { expanded: {} } })
 
+  const markFg = (change: SessionChange) => {
+    if (change.status === "added") return theme().diff.text.added
+    if (change.status === "deleted") return theme().diff.text.removed
+    return theme().text.muted
+  }
+  const selected = (id: string) => memory.selection?.sessionID === props.sessionID && memory.selection?.changeID === id
   const open = (change: SessionChange) => {
-    setSelection({ sessionID: props.sessionID, changeID: change.id })
+    updateMemory((draft) => {
+      draft.selection = { sessionID: props.sessionID, changeID: change.id }
+    })
     props.context.ui.panel.open("changes", { presentation: "panel" })
   }
 
@@ -53,44 +55,52 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
         <Index each={steps()}>
           {(step) => (
             <box>
-              <box flexDirection="row" gap={1} onMouseDown={() => toggle(step().id)}>
-                <text fg={theme().text.muted}>{expanded()[step().id] ? "▼" : "▶"}</text>
+              <box
+                flexDirection="row"
+                gap={1}
+                onMouseDown={() =>
+                  updateMemory((draft) => {
+                    draft.expanded[step().id] = !(draft.expanded[step().id] ?? false)
+                  })
+                }
+              >
+                <text fg={theme().text.muted}>{memory.expanded[step().id] ? "▼" : "▶"}</text>
                 <text flexGrow={1} wrapMode="word" fg={theme().text.base}>
                   [{statusMark(step().status)}] {step().label}
                 </text>
               </box>
-              <Show when={expanded()[step().id]}>
+              <Show when={memory.expanded[step().id]}>
                 <box paddingLeft={2}>
                   <Show
                     when={step().changes.length > 0}
                     fallback={<text fg={theme().text.muted}>No changes yet.</text>}
                   >
                     <Index each={step().changes}>
-                      {(change) => {
-                        const selected = () =>
-                          selection()?.sessionID === props.sessionID && selection()?.changeID === change().id
-                        return (
-                          <box
-                            flexDirection="row"
-                            gap={1}
-                            onMouseUp={() => open(change())}
-                            backgroundColor={selected() ? theme().background.raised.high : undefined}
+                      {(change) => (
+                        <box
+                          flexDirection="row"
+                          gap={1}
+                          onMouseUp={() => open(change())}
+                          backgroundColor={selected(change().id) ? theme().background.raised.high : undefined}
+                        >
+                          <text flexShrink={0} fg={markFg(change())}>
+                            {changeMark(change().status)}
+                          </text>
+                          <text
+                            flexGrow={1}
+                            wrapMode="word"
+                            fg={selected(change().id) ? theme().text.base : theme().text.muted}
                           >
-                            <text flexShrink={0} fg={selected() ? theme().text.base : theme().text.muted}>
-                              •
-                            </text>
-                            <text flexGrow={1} wrapMode="word" fg={selected() ? theme().text.base : theme().text.muted}>
-                              {change().file}
-                            </text>
-                            <text flexShrink={0} fg={theme().diff.text.added}>
-                              +{change().additions}
-                            </text>
-                            <text flexShrink={0} fg={theme().diff.text.removed}>
-                              -{change().deletions}
-                            </text>
-                          </box>
-                        )
-                      }}
+                            {change().file}
+                          </text>
+                          <text flexShrink={0} fg={theme().diff.text.added}>
+                            +{change().additions}
+                          </text>
+                          <text flexShrink={0} fg={theme().diff.text.removed}>
+                            -{change().deletions}
+                          </text>
+                        </box>
+                      )}
                     </Index>
                   </Show>
                 </box>
@@ -107,7 +117,23 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
   const theme = () => props.context.theme
   const { currentSyntax } = useThemes()
   const messages = createMemo(() => props.context.data.session.message.list(props.input.sessionID))
-  const current = createMemo(() => resolve(messages(), props.input.sessionID))
+  const [memory, updateMemory] = props.context.storage.memory<ChangesMemory>("state", { initial: { expanded: {} } })
+  const current = createMemo(() => {
+    const selection = memory.selection
+    if (!selection || selection.sessionID !== props.input.sessionID) return
+    for (const step of deriveSteps(messages())) {
+      const change = step.changes.find((item) => item.id === selection.changeID)
+      if (change) return { step, change }
+    }
+    return
+  })
+
+  const close = () => {
+    updateMemory((draft) => {
+      draft.selection = undefined
+    })
+    props.input.close()
+  }
 
   const undo = async (change: SessionChange) => {
     const list = messages()
@@ -126,9 +152,21 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
       label: { confirm: "Undo" },
     })
     if (!confirmed) return
-    await props.context.client.session.revert.stage({ sessionID: props.input.sessionID, messageID: boundary.id })
-    setSelection(undefined)
-    props.context.ui.toast.show({ message: `Reverted step containing ${change.file}`, variant: "success" })
+    try {
+      const sessionID = props.input.sessionID
+      // Revert staging is rejected while the session is executing, so stop and drain it first.
+      if (props.context.data.session.status(sessionID) === "running") {
+        await props.context.client.session.interrupt({ sessionID })
+        await props.context.client.session.wait({ sessionID })
+      }
+      await props.context.client.session.revert.stage({ sessionID, messageID: boundary.id })
+      updateMemory((draft) => {
+        draft.selection = undefined
+      })
+      props.context.ui.toast.show({ message: `Reverted step containing ${change.file}`, variant: "success" })
+    } catch (error) {
+      props.context.ui.toast.show({ message: errorMessage(error), variant: "error" })
+    }
   }
 
   return (
@@ -145,18 +183,19 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
               <text fg={theme().text.base}>
                 <b>{value().change.file}</b>
               </text>
+              <Show when={value().change.status}>{(status) => <text fg={theme().text.muted}>[{status()}]</text>}</Show>
               <text fg={theme().diff.text.added}>+{value().change.additions}</text>
               <text fg={theme().diff.text.removed}>-{value().change.deletions}</text>
               <box flexGrow={1} />
               <box onMouseUp={() => void undo(value().change)}>
-                <text fg={theme().text.feedback.error.base}>
+                <text fg={theme().text.action.destructive.base}>
                   <b>⟲ Undo</b>
                 </text>
               </box>
               <box onMouseUp={props.input.toggleFullscreen}>
                 <text fg={theme().text.muted}>{props.input.presentation === "fullscreen" ? "⤡" : "⤢"}</text>
               </box>
-              <box onMouseUp={props.input.close}>
+              <box onMouseUp={close}>
                 <text fg={theme().text.muted}>✕</text>
               </box>
             </box>
@@ -220,6 +259,7 @@ function Commands(props: { context: Plugin.Context }) {
         slash: { name: "changes" },
         group: "Session",
         palette: true,
+        enabled: () => props.context.ui.router.current().type === "session",
         run() {
           props.context.ui.panel.open("changes", { presentation: "panel" })
         },

@@ -4,12 +4,13 @@ import { canonicalToolName, finiteNumber, toolDisplayMetadata } from "../../util
 export type SessionChange = {
   id: string
   file: string
+  /** Unified patch. Absent for `write`, whose completed result carries no file metadata. */
   patch?: string
   additions: number
   deletions: number
+  /** Absent when the producer did not report one (e.g. `write`). */
   status?: "added" | "deleted" | "modified"
   messageID: string
-  toolID: string
 }
 
 export type SessionStep = {
@@ -30,42 +31,28 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value : undefined
 }
 
-function countPatch(patch: string) {
-  let additions = 0
-  let deletions = 0
-  for (const line of patch.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) additions++
-    else if (line.startsWith("-") && !line.startsWith("---")) deletions++
-  }
-  return { additions, deletions }
-}
-
-function diffStatus(patch: string, fallback: SessionChange["status"]): SessionChange["status"] {
-  if (patch.includes("deleted file mode") || patch.startsWith("+++ /dev/null")) return "deleted"
-  if (patch.includes("new file mode") || patch.startsWith("--- /dev/null")) return "added"
-  return fallback
-}
-
 type PatchFile = {
   file: string
-  patch?: string
+  patch: string
   additions: number
   deletions: number
   status?: SessionChange["status"]
 }
 
+/** `metadata.files` is the canonical `FileDiff.Info` list emitted by edit/patch. */
 function parsePatchFiles(value: unknown): PatchFile[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((item) => {
     const file = record(item)
     if (!file) return []
-    const path = stringValue(file.file) ?? stringValue(file.relativePath)
-    if (!path) return []
+    const path = stringValue(file.file)
+    const patch = stringValue(file.patch)
+    if (!path || patch === undefined) return []
     const status = stringValue(file.status)
     return [
       {
         file: path,
-        patch: stringValue(file.patch),
+        patch,
         additions: finiteNumber(file.additions) ?? 0,
         deletions: finiteNumber(file.deletions) ?? 0,
         status: status === "added" || status === "deleted" || status === "modified" ? status : undefined,
@@ -74,46 +61,27 @@ function parsePatchFiles(value: unknown): PatchFile[] {
   })
 }
 
-/** A change is a file-producing tool call: edit/write/patch. Patch text comes from metadata. */
+/** A change is a completed file-producing tool call: edit/patch (metadata.files) or write. */
 function changesFromTool(part: SessionMessageAssistantTool, messageID: string): SessionChange[] {
-  if (part.state.status === "streaming") return []
-  const input = part.state.input
-  const metadata = toolDisplayMetadata(part.state)
-  const toolID = part.id
+  if (part.state.status !== "completed") return []
 
-  const files = parsePatchFiles(metadata.files)
+  const files = parsePatchFiles(toolDisplayMetadata(part.state).files)
   if (files.length) {
     return files.map((file, index) => ({
-      id: `${toolID}:${index}`,
+      id: `${part.id}:${index}`,
       file: file.file,
       patch: file.patch,
-      additions: file.patch ? countPatch(file.patch).additions : file.additions,
-      deletions: file.patch ? countPatch(file.patch).deletions : file.deletions,
-      status: file.status ?? (file.patch ? diffStatus(file.patch, "modified") : "modified"),
+      additions: file.additions,
+      deletions: file.deletions,
+      status: file.status,
       messageID,
-      toolID,
     }))
   }
 
-  const diff = stringValue(metadata.diff)
-  if (diff !== undefined) {
-    const file = stringValue(input.path) ?? stringValue(input.filePath) ?? "(unknown)"
-    return [
-      {
-        id: `${toolID}:0`,
-        file,
-        patch: diff,
-        ...countPatch(diff),
-        status: diffStatus(diff, "modified"),
-        messageID,
-        toolID,
-      },
-    ]
-  }
-
+  // `write` returns output/content only; its diff is never persisted on the tool result.
   if (canonicalToolName(part.name) === "write") {
-    const file = stringValue(input.path) ?? stringValue(input.filePath)
-    if (file) return [{ id: `${toolID}:0`, file, additions: 0, deletions: 0, status: "modified", messageID, toolID }]
+    const file = stringValue(part.state.input.path)
+    if (file) return [{ id: `${part.id}:0`, file, additions: 0, deletions: 0, messageID }]
   }
 
   return []

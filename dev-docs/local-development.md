@@ -13,8 +13,8 @@ The repo pins `packageManager: bun@1.4.2`; the pre-push hook rejects older Bun.
 ## Launcher
 
 `bin/opencode-local` runs the V2 CLI/TUI from source. The dev entry must run with `CWD=packages/cli` for workspace module
-resolution, so the script cd's there and passes your original directory as the CLI's `[directory]` positional. It uses the
-local/dev channel (`service-local.json`), so it does not touch the installed `opencode` or its background service.
+resolution, so the script cd's there and passes your original directory as the CLI's `[directory]` positional. It runs the
+local development build, so it does not replace the background service used by the installed `opencode`.
 
 Install it on PATH once:
 

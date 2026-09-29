@@ -44,6 +44,7 @@ function context() {
       },
     },
     ui: { panel: { open: () => true } },
+    storage: { memory: (_key: string, options: { initial: unknown }) => [options.initial, () => {}] },
   } as unknown as Context
 }
 
