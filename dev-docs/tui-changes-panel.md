@@ -29,6 +29,11 @@ disk-backed `storage.store("history")`, debounced ~600ms because reasoning strea
 removes prompts or steps, so the tree is a growing, persistent history that survives the client window and restarts.
 Rendering reads the accumulated store, not `message.list()`.
 
+A session resumed from history is also **backfilled**: the component paginates
+`client.message.list({ sessionID, limit: 100, order: "desc", cursor })` (up to 10 pages) and merges that full projection,
+so older steps and their changes are present without depending on the transcript viewport. The live effect then keeps it
+current.
+
 Change data comes from `metadata.files` (the canonical `FileDiff.Info`: `file`, `patch`, `additions`, `deletions`,
 `status`). `write` returns only `output`/`content` and never persists a diff, so a `write` change has no patch and no
 reported status; the panel shows "No diff available for this change." for it. Only completed tool calls contribute changes.
