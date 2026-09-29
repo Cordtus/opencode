@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Launch the local V2 CLI/TUI from this checkout, leaving the installed
+# `opencode` binary and its background service untouched.
+#
+# The dev entry must run with CWD=packages/cli so workspace module resolution
+# works, so we pass the caller's original directory as the CLI's [directory]
+# positional instead of relying on the process CWD.
+set -euo pipefail
+
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+root="$(cd "$(dirname "$self")/.." && pwd)"
+original="$PWD"
+
+cd "$root/packages/cli"
+exec bun run src/index.ts "$original" "$@"
