@@ -1,4 +1,9 @@
-import type { SessionMessageAssistant, SessionMessageAssistantTool, SessionMessageInfo } from "@opencode/client"
+import type {
+  SessionMessageAssistant,
+  SessionMessageAssistantTool,
+  SessionMessageInfo,
+  SessionMessageUser,
+} from "@opencode/client"
 import { canonicalToolName, finiteNumber, toolDisplayMetadata } from "../../util/tool-display"
 
 export type SessionChange = {
@@ -22,6 +27,13 @@ export type SessionStep = {
   changes: SessionChange[]
 }
 
+export type SessionPrompt = {
+  /** User message ID, or `prompt:start` for steps before the first prompt. */
+  id: string
+  label: string
+  steps: SessionStep[]
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return
   return value as Record<string, unknown>
@@ -29,6 +41,17 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : undefined
+}
+
+function truncate(value: string, length = 72) {
+  return value.length > length ? `${value.slice(0, length - 1)}…` : value
+}
+
+function firstLine(value: string) {
+  return value
+    .split("\n")
+    .find((line) => line.trim())
+    ?.trim()
 }
 
 type PatchFile = {
@@ -90,43 +113,100 @@ function changesFromTool(part: SessionMessageAssistantTool, messageID: string): 
 function stepLabel(message: SessionMessageAssistant, index: number) {
   const first = message.content
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
-    .map((text) =>
-      text
-        .split("\n")
-        .find((line) => line.trim())
-        ?.trim(),
-    )
+    .map(firstLine)
     .find(Boolean)
-  if (!first) return `Step ${index}`
-  return first.length > 72 ? `${first.slice(0, 71)}…` : first
+  return first ? truncate(first) : `Step ${index}`
+}
+
+function promptLabel(message: SessionMessageUser, index: number) {
+  const first = firstLine(message.text)
+  return first ? truncate(first) : `Prompt ${index}`
 }
 
 /**
  * V2 removed the todo model and the `todowrite` tool, so there is no plan to attach
  * changes to. The closest durable unit is the logical step = one assistant message
- * (`SessionMessageAssistant`). Each step carries its reasoning and the file changes
- * from the edit/write/patch tool calls it contains.
+ * (`SessionMessageAssistant`), nested under the user prompt that started it.
+ *
+ * Steps without changes are kept once seen (a "Step 5" that appeared must not vanish
+ * when it completes), so the projection is a growing history rather than a live filter.
  */
-export function deriveSteps(messages: SessionMessageInfo[]): SessionStep[] {
-  const steps: SessionStep[] = []
-  let index = 0
+export function deriveHistory(messages: SessionMessageInfo[]): SessionPrompt[] {
+  const prompts: SessionPrompt[] = []
+  let prompt: SessionPrompt | undefined
+  let promptIndex = 0
+  let stepIndex = 0
+
+  const ensurePrompt = () => {
+    if (prompt) return prompt
+    promptIndex++
+    prompt = { id: "prompt:start", label: `Session start`, steps: [] }
+    prompts.push(prompt)
+    return prompt
+  }
+
   for (const message of messages) {
+    if (message.type === "user") {
+      promptIndex++
+      stepIndex = 0
+      prompt = { id: message.id, label: promptLabel(message, promptIndex), steps: [] }
+      prompts.push(prompt)
+      continue
+    }
     if (message.type !== "assistant") continue
-    index++
+
     const changes = message.content.flatMap((part) => (part.type === "tool" ? changesFromTool(part, message.id) : []))
-    const running = message.time.completed === undefined
-    if (changes.length === 0 && !running) continue
     const reasoning = message.content
       .flatMap((part) => (part.type === "reasoning" ? [part.text] : []))
       .filter(Boolean)
       .join("\n\n")
-    steps.push({
+    const hasTool = message.content.some((part) => part.type === "tool")
+    // Keep only steps that did something: a change, a thought, or a tool call.
+    if (changes.length === 0 && !reasoning && !hasTool) continue
+
+    stepIndex++
+    ensurePrompt().steps.push({
       id: message.id,
-      label: stepLabel(message, index),
-      status: message.error ? "error" : running ? "running" : "done",
+      label: stepLabel(message, stepIndex),
+      status: message.error ? "error" : message.time.completed === undefined ? "running" : "done",
       reasoning,
       changes,
     })
   }
-  return steps
+
+  return prompts
+}
+
+/**
+ * Union-merge a freshly derived history into the accumulated one. Steps and prompts
+ * are never removed: once the client message window (last ~20) drops a message, the
+ * persisted copy is the only remaining record.
+ */
+export function mergeHistory(previous: SessionPrompt[] | undefined, next: SessionPrompt[]): SessionPrompt[] {
+  if (!previous?.length) return next
+
+  const prompts = new Map(previous.map((prompt) => [prompt.id, prompt]))
+  const order = previous.map((prompt) => prompt.id)
+  for (const incoming of next) {
+    const existing = prompts.get(incoming.id)
+    if (!existing) {
+      prompts.set(incoming.id, incoming)
+      order.push(incoming.id)
+      continue
+    }
+    existing.label = incoming.label
+    const steps = new Map(existing.steps.map((step) => [step.id, step]))
+    for (const step of incoming.steps) {
+      const prior = steps.get(step.id)
+      if (!prior) {
+        existing.steps.push(step)
+        continue
+      }
+      prior.label = step.label
+      prior.status = step.status
+      prior.reasoning = step.reasoning
+      prior.changes = step.changes
+    }
+  }
+  return order.map((id) => prompts.get(id)!)
 }

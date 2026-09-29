@@ -3,7 +3,7 @@
 A change-inspection surface for the V2 TUI: a task tree in the sidebar and a right-hand detail panel showing a selected
 change's diff, the reasoning that produced it, and an Undo action.
 
-## Why the task tree is derived, not stored
+## Why the task tree is derived, then accumulated
 
 V2 removed the todo model entirely: `REMOVED_TOOLS = ["todowrite"]`
 (`packages/core/src/database/v1-migration.bun.ts`), there is no `session.todo` event/schema/client accessor, and the v1
@@ -11,25 +11,41 @@ sidebar todo plugin is gone. There is no plan to attach changes to.
 
 The closest durable unit is the **logical step = one assistant message** (`SessionMessageAssistant`). A step's changes are
 the `edit` / `write` / `patch` tool calls in that message's `content`; its reasoning is the message's reasoning parts.
-`deriveSteps` in `packages/tui/src/feature-plugins/system/changes-model.ts` does this purely and is unit-tested.
+`deriveHistory` in `packages/tui/src/feature-plugins/system/changes-model.ts` does this purely and is unit-tested.
+
+### Hierarchy
+
+`session (implicit) → prompt (user message) → step (assistant message) → change (file)`
+
+### Persistence (why it is not a live filter)
+
+The client only holds a window of recent messages (`messagePageLimit = 20` in `packages/client/src/solid/data.ts`) and
+`evictSession` deletes messages for non-retained sessions. Deriving the tree directly from `message.list()` therefore lost
+steps as a session grew ("Step 5" appearing then vanishing and being unrecoverable), and completed steps with no changes
+were filtered out.
+
+Instead a `History` component (also on the `app` slot) derives the current session and **union-merges** it into a
+disk-backed `storage.store("history")`, debounced ~600ms because reasoning streams token-by-token. `mergeHistory` never
+removes prompts or steps, so the tree is a growing, persistent history that survives the client window and restarts.
+Rendering reads the accumulated store, not `message.list()`.
 
 Change data comes from `metadata.files` (the canonical `FileDiff.Info`: `file`, `patch`, `additions`, `deletions`,
 `status`). `write` returns only `output`/`content` and never persists a diff, so a `write` change has no patch and no
-reported status; the panel shows "No diff available for this change." for it. Only completed tool calls are considered.
+reported status; the panel shows "No diff available for this change." for it. Only completed tool calls contribute changes.
 
 ## Components
 
-- `feature-plugins/system/changes-model.ts` — pure `deriveSteps(messages)`; change extraction from tool metadata
-  (`metadata.files` preferred, then `metadata.diff`, then a patchless `write`).
+- `feature-plugins/system/changes-model.ts` — pure `deriveHistory(messages)` and `mergeHistory(previous, next)`; change
+  extraction from `metadata.files`, with a patchless fallback for `write`.
 - `feature-plugins/system/changes.tsx` — the `opencode.changes` built-in plugin:
-  - `prepend` on `sidebar.content` → `TaskTree` (expand a step to its changes; click a change to select).
+  - `append` on `app` → `History` (accumulates the durable projection) and `Commands` (registers `session.changes`, keybind
+    `<leader>d`, slash `/changes`).
+  - `prepend` on `sidebar.content` → `TaskTree` (prompt → step → change; click a change to select).
   - `append` on `session.panel` → `ChangeDetail` (diff top half, reasoning bottom half, both scrollable; Undo).
-  - `append` on `app` → `Commands`, which registers `session.changes` (keybind `<leader>d`, slash `/changes`) that opens
-    the panel.
 - Registered in `plugin/builtins.ts`; keybind default in `config/keybind.ts`.
 
-Selection and step expansion live in the plugin memory store (`context.storage.memory("state")`), which stays shared
-between the sidebar and the panel and survives plugin hot reloads.
+Selection and expansion live in the plugin memory store (`context.storage.memory("state")`), shared between the sidebar and
+the panel and surviving hot reloads. Prompts default expanded, steps default collapsed.
 
 ## Panel reuse
 
@@ -53,3 +69,5 @@ See `dev-docs/local-development.md` (`opencode-local`).
 
 - 2026-09-28: Retargeted the feature from the `dev` line to V2 (`origin/v2`). Reimplemented against the V2 plugin/panel
   architecture after confirming V2 has no todo model.
+- 2026-09-29: Steps no longer vanish. The tree is now an accumulated, disk-backed projection (`deriveHistory` +
+  `mergeHistory`) nested as session → prompt → step → change, because the client only windows the last ~20 messages.
