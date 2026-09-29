@@ -1,11 +1,10 @@
 import { Plugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
-import { createEffect, createMemo, Index, on, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, Index, onCleanup, Show } from "solid-js"
 import { useThemes } from "../../context/theme"
 import { PatchDiff } from "../../component/patch-diff"
 import { filetype } from "../../util/filetype"
 import { errorMessage } from "../../util/error"
-import type { SessionMessageInfo } from "@opencode/client"
 import { deriveHistory, mergeHistory, type SessionChange, type SessionPrompt } from "./changes-model"
 
 type Selection = { sessionID: string; changeID: string }
@@ -60,7 +59,7 @@ function History(props: { context: Plugin.Context }) {
     pending = undefined
     void update((draft) => {
       draft.sessions[sessionID] = mergeHistory(draft.sessions[sessionID], prompts)
-    })
+    }).catch(() => {})
   }
   createEffect(() => {
     const route = props.context.ui.router.current()
@@ -79,40 +78,6 @@ function History(props: { context: Plugin.Context }) {
     if (timer) clearTimeout(timer)
     flush()
   })
-
-  // The client store only holds a page of messages, so a resumed session would otherwise
-  // miss older steps and their changes. Backfill the full session once per session ID
-  // and union-merge it; the live effect above then keeps it current.
-  const backfilled = new Set<string>()
-  createEffect(
-    on(
-      () => {
-        const route = props.context.ui.router.current()
-        return route.type === "session" ? route.sessionID : undefined
-      },
-      (sessionID) => {
-        if (!sessionID || backfilled.has(sessionID)) return
-        backfilled.add(sessionID)
-        void backfill(sessionID)
-      },
-    ),
-  )
-  async function backfill(sessionID: string) {
-    const collected: SessionMessageInfo[] = []
-    let cursor: string | undefined
-    for (let page = 0; page < 10; page++) {
-      const response = await props.context.client.message.list({ sessionID, limit: 100, order: "desc", cursor })
-      collected.push(...response.data)
-      cursor = response.cursor.next ?? undefined
-      if (!cursor || response.data.length === 0) break
-    }
-    if (!collected.length) return
-    const prompts = deriveHistory(collected.reverse())
-    if (!prompts.length) return
-    await update((draft) => {
-      draft.sessions[sessionID] = mergeHistory(draft.sessions[sessionID], prompts)
-    })
-  }
   return null
 }
 
