@@ -30,3 +30,18 @@ Then use `opencode-local` anywhere. `opencode-local --version` prints `vlocal`.
 
 For testing against the currently running installed server and live sessions, use `bun run dev:live` from the repo root
 instead (it connects to an existing server and spawns nothing).
+
+## Free-tier (Console) models
+
+OpenCode Console free-tier models reject requests that do not come from an official client. The local dev entry has no
+build-time `OPENCODE_VERSION` / `OPENCODE_CHANNEL` defines, so it advertises `channel=local`, `version=local`, and the
+Console provider answers `OpenCode's free tier can only be used from within OpenCode`.
+
+Model requests are made by the **server**, so use the installed server (which advertises the real release identity):
+
+```sh
+bun run dev:live /path/to/project
+```
+
+Our modified TUI is only the client, so the free tier works there. A standalone `opencode-local` server needs a paid
+provider/API key instead.
