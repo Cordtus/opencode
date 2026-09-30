@@ -146,6 +146,12 @@ export interface Interface {
     readonly to?: SessionMessage.ID
     readonly context?: number
   }) => Effect.Effect<readonly FileDiff.Info[], NotFoundError | MessageNotFoundError | TurnRangeError | Snapshot.Error>
+  /** Structured diffs of the files one assistant step changed; see `SessionDiff.step`. */
+  readonly stepDiff: (input: {
+    readonly sessionID: SessionSchema.ID
+    readonly messageID: SessionMessage.ID
+    readonly context?: number
+  }) => Effect.Effect<readonly FileDiff.Info[], NotFoundError | MessageNotFoundError | TurnRangeError | Snapshot.Error>
   /**
    * Durable admitted session work not yet visible in projected history,
    * ordered by admission. Includes unpromoted user and synthetic inputs and
@@ -383,6 +389,16 @@ const layer = Layer.effect(
           active,
           from: input.from,
           to: input.to,
+          context: input.context,
+        })
+      }),
+      stepDiff: Effect.fn("Session.stepDiff")(function* (input) {
+        const session = yield* result.get(input.sessionID)
+        const active = yield* execution.isActive(input.sessionID)
+        return yield* SessionDiff.step(db, locations, {
+          session,
+          active,
+          messageID: input.messageID,
           context: input.context,
         })
       }),

@@ -1,11 +1,21 @@
 import { Plugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
-import { createEffect, createMemo, Index, onCleanup, Show } from "solid-js"
+import { isInvalidRequestError } from "@opencode/client/promise"
+import { createEffect, createMemo, createResource, Index, onCleanup, Show } from "solid-js"
 import { useThemes } from "../../context/theme"
 import { PatchDiff } from "../../component/patch-diff"
 import { filetype } from "../../util/filetype"
 import { errorMessage } from "../../util/error"
-import { deriveHistory, mergeHistory, type SessionChange, type SessionPrompt } from "./changes-model"
+import { toolDisplayMetadata } from "../../util/tool-display"
+import {
+  deriveHistory,
+  legacyPatch,
+  livePatch,
+  matchesFile,
+  mergeHistory,
+  type SessionChange,
+  type SessionPrompt,
+} from "./changes-model"
 
 type Selection = { sessionID: string; changeID: string }
 
@@ -128,11 +138,23 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
                   <box paddingLeft={2}>
                     <Index each={prompt().steps}>
                       {(step) => {
-                        const stepExpanded = () => memory.expanded[step().id] ?? false
+                        // Only a step that produced a change can expand; read-only steps keep a
+                        // greyed, inert arrow so they are still visibly present but not "changes".
+                        const expandable = () => step().changes.length > 0
+                        const stepExpanded = () => expandable() && (memory.expanded[step().id] ?? false)
                         return (
                           <box>
-                            <box flexDirection="row" gap={1} onMouseDown={() => toggle(step().id, false)}>
-                              <text flexShrink={0} fg={levelColor(theme(), 1)}>
+                            <box
+                              flexDirection="row"
+                              gap={1}
+                              onMouseDown={() => {
+                                if (expandable()) toggle(step().id, false)
+                              }}
+                            >
+                              <text
+                                flexShrink={0}
+                                fg={expandable() ? levelColor(theme(), 1) : theme().text.formfield.disabled}
+                              >
                                 {stepExpanded() ? "▼" : "▶"}
                               </text>
                               <text flexShrink={0} fg={statusColor(theme(), step().status)}>
@@ -144,40 +166,40 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
                             </box>
                             <Show when={stepExpanded()}>
                               <box paddingLeft={2}>
-                                <Show
-                                  when={step().changes.length > 0}
-                                  fallback={<text fg={theme().text.muted}>No changes recorded.</text>}
-                                >
-                                  <Index each={step().changes}>
-                                    {(change) => (
-                                      <box
-                                        flexDirection="row"
-                                        gap={1}
-                                        onMouseUp={() => open(change())}
-                                        backgroundColor={
-                                          selected(change().id) ? theme().background.raised.high : undefined
-                                        }
+                                <Index each={step().changes}>
+                                  {(change) => (
+                                    <box
+                                      flexDirection="row"
+                                      gap={1}
+                                      onMouseUp={() => open(change())}
+                                      backgroundColor={
+                                        selected(change().id) ? theme().background.raised.high : undefined
+                                      }
+                                    >
+                                      <text flexShrink={0} fg={markFg(change())}>
+                                        {changeMark(change().status)}
+                                      </text>
+                                      <Show when={change().kind === "plan"}>
+                                        <text flexShrink={0} fg={theme().text.muted}>
+                                          plan
+                                        </text>
+                                      </Show>
+                                      <text
+                                        flexGrow={1}
+                                        wrapMode="word"
+                                        fg={selected(change().id) ? theme().text.base : levelColor(theme(), 2)}
                                       >
-                                        <text flexShrink={0} fg={markFg(change())}>
-                                          {changeMark(change().status)}
-                                        </text>
-                                        <text
-                                          flexGrow={1}
-                                          wrapMode="word"
-                                          fg={selected(change().id) ? theme().text.base : levelColor(theme(), 2)}
-                                        >
-                                          {change().file}
-                                        </text>
-                                        <text flexShrink={0} fg={theme().diff.text.added}>
-                                          +{change().additions}
-                                        </text>
-                                        <text flexShrink={0} fg={theme().diff.text.removed}>
-                                          -{change().deletions}
-                                        </text>
-                                      </box>
-                                    )}
-                                  </Index>
-                                </Show>
+                                        {change().file}
+                                      </text>
+                                      <text flexShrink={0} fg={theme().diff.text.added}>
+                                        +{change().additions}
+                                      </text>
+                                      <text flexShrink={0} fg={theme().diff.text.removed}>
+                                        -{change().deletions}
+                                      </text>
+                                    </box>
+                                  )}
+                                </Index>
                               </box>
                             </Show>
                           </box>
@@ -195,7 +217,7 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
   )
 }
 
-function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
+export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
   const theme = () => props.context.theme
   const { currentSyntax } = useThemes()
   const history = props.context.storage.store<HistoryStore>("history", HistoryStoreOptions)
@@ -211,6 +233,39 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
     }
     return
   })
+  // The durable history stores no patches: the diff lives in the snapshot repository, so it is
+  // loaded per step on selection rather than duplicated per change. `/redo` keeps a legacy step's
+  // stored patch, and a step still in this client's window keeps its tool result's patch.
+  const selected = createMemo(() => current()?.change)
+  const sessionLocation = () =>
+    props.context.data.session.get(props.input.sessionID)?.location ?? props.context.data.location.default()
+  const [patch] = createResource(
+    () => selected()?.id,
+    async (id) => {
+      const change = selected()
+      if (!change || change.id !== id) return undefined
+      const legacy = legacyPatch(change)
+      if (legacy) return legacy
+      const diffsAvailable = props.context.data.location.vcs.info(sessionLocation())?.provider === "git"
+      if (!diffsAvailable) return undefined
+      const live = livePatch(props.context.data.session.message.get(props.input.sessionID, change.messageID), change)
+      if (live) return live
+      try {
+        const diffs = await props.context.client.session.step.diff({
+          sessionID: props.input.sessionID,
+          messageID: change.messageID,
+        })
+        const match =
+          diffs.find((diff) => diff.file === change.file) ?? diffs.find((diff) => matchesFile(diff.file, change.file))
+        return match?.patch
+      } catch (error) {
+        // A step spanning a location change is a rejection, not a failure we can re-render.
+        if (isInvalidRequestError(error)) return undefined
+        props.context.ui.toast.show({ message: errorMessage(error), variant: "error" })
+        return undefined
+      }
+    },
+  )
 
   const close = () => {
     props.context.storage.memory<ChangesMemory>("state", MemoryOptions)[1]((draft) => {
@@ -280,6 +335,9 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
               <text fg={theme().text.base}>
                 <b>{value().change.file}</b>
               </text>
+              <Show when={value().change.kind === "plan"}>
+                <text fg={theme().text.muted}>[plan]</text>
+              </Show>
               <Show when={value().change.status}>{(status) => <text fg={theme().text.muted}>[{status()}]</text>}</Show>
               <text fg={theme().diff.text.added}>+{value().change.additions}</text>
               <text fg={theme().diff.text.removed}>-{value().change.deletions}</text>
@@ -307,12 +365,16 @@ function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
             <box flexGrow={1} flexBasis={0} minHeight={0}>
               <scrollbox flexGrow={1} minHeight={0} horizontalScrollbarOptions={{ visible: false }}>
                 <Show
-                  when={value().change.patch}
-                  fallback={<text fg={theme().text.muted}>No diff available for this change.</text>}
+                  when={!patch.loading && patch()}
+                  fallback={
+                    <text fg={theme().text.muted}>
+                      {patch.loading ? "Loading diff…" : "No diff available for this change."}
+                    </text>
+                  }
                 >
-                  {(patch) => (
+                  {(text) => (
                     <PatchDiff
-                      diff={patch()}
+                      diff={text()}
                       hunkFg={theme().diff.text.hunkHeader}
                       view="unified"
                       filetype={filetype(value().change.file)}

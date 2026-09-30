@@ -122,17 +122,33 @@ describe("Session.diff", () => {
           // Edits made while idle are not a turn's work, but a range spanning them still sees them.
           yield* Effect.promise(write("manual.txt", "manual edited\n"))
           const second = yield* prompt("Edit the second file")
-          yield* step(write("second.txt", "second edited\n"), "recorded")
+          const secondStep = yield* step(write("second.txt", "second edited\n"), "recorded")
           expect(yield* diff()).toEqual([["second.txt", "modified", 1, 1]])
           expect(yield* diff({ from: first })).toEqual([["first.txt", "modified", 1, 1]])
+
+          // A step diff is isolated to its own start/end snapshots, never a sibling step.
+          const stepDiff = (messageID: SessionMessage.ID) =>
+            sessions
+              .stepDiff({ sessionID: created.id, messageID, context: 0 })
+              .pipe(Effect.map((files) => files.map(summarize)))
+          expect(yield* stepDiff(firstStep)).toEqual([["first.txt", "modified", 1, 1]])
+          expect(yield* stepDiff(secondStep)).toEqual([["second.txt", "modified", 1, 1]])
+          // A non-assistant message has no step range, and an unknown message is not found.
+          expect(yield* stepDiff(first)).toEqual([])
+          expect(yield* stepDiff(SessionMessage.ID.create()).pipe(Effect.flip)).toMatchObject({
+            _tag: "Session.MessageNotFoundError",
+          })
 
           // Once markers exist, a turn spans a whole busy period, steers included; earlier history merges into the first one.
           yield* idle("succeeded")
           const third = yield* prompt("Add a third file")
-          yield* step(write("third.txt", "third\n"), "recorded")
+          const thirdStep = yield* step(write("third.txt", "third\n"), "recorded")
           const steer = yield* prompt("Also add a fourth file")
-          yield* step(write("fourth.txt", "fourth\n"), "recorded")
+          const fourthStep = yield* step(write("fourth.txt", "fourth\n"), "recorded")
           yield* idle("failed")
+          // Two steps in one busy period still diff independently.
+          expect(yield* stepDiff(thirdStep)).toEqual([["third.txt", "added", 1, 0]])
+          expect(yield* stepDiff(fourthStep)).toEqual([["fourth.txt", "added", 1, 0]])
           const busy = [
             ["fourth.txt", "added", 1, 0],
             ["third.txt", "added", 1, 0],
@@ -171,6 +187,18 @@ describe("Session.diff", () => {
           yield* step(write("second.txt", "second edited twice\n"), "unrecorded")
           yield* idle("succeeded")
           expect(yield* diff()).toEqual([["first.txt", "modified", 1, 1]])
+
+          // A step whose range crosses a location switch has no comparable snapshot pair.
+          const movedStep = yield* step(write("second.txt", "second edited thrice\n"), "running")
+          yield* bus.publish(SessionEvent.Moved, {
+            sessionID: created.id,
+            location: created.location,
+            projectID: created.projectID,
+          })
+          expect(yield* stepDiff(movedStep).pipe(Effect.flip)).toMatchObject({
+            _tag: "Session.TurnRangeError",
+            field: "to",
+          })
 
           // Only a step still running in the active session compares against the working copy.
           yield* prompt("Delete the manual file")

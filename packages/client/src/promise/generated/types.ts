@@ -4515,6 +4515,14 @@ export type SessionDiffInput = {
 
 export type SessionDiffOutput = { data: Array<FileDiffInfo> }["data"]
 
+export type SessionStepDiffInput = {
+  readonly sessionID: { readonly sessionID: string; readonly messageID: string }["sessionID"]
+  readonly messageID: { readonly sessionID: string; readonly messageID: string }["messageID"]
+  readonly context?: { readonly context?: number | undefined }["context"]
+}
+
+export type SessionStepDiffOutput = { data: Array<FileDiffInfo> }["data"]
+
 export type SessionInboxListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionInboxListOutput = { data: Array<SessionInboxInfo> }["data"]

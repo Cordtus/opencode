@@ -9,13 +9,28 @@ import { canonicalToolName, finiteNumber, toolDisplayMetadata } from "../../util
 export type SessionChange = {
   id: string
   file: string
-  /** Unified patch. Absent for `write`, whose completed result carries no file metadata. */
-  patch?: string
   additions: number
   deletions: number
   /** Absent when the producer did not report one (e.g. `write`). */
   status?: "added" | "deleted" | "modified"
+  /**
+   * `"plan"` marks an edit to the Plan agent's document directory. It is still a change, but
+   * read-only work only ever produces this kind, so the panel can tell a plan update from a
+   * code change.
+   */
+  kind?: "plan"
   messageID: string
+}
+
+/**
+ * A legacy change whose `patch` was persisted before diffs moved to the snapshot repository.
+ * `deriveHistory` never produces it; it ages out of the store as steps are re-projected.
+ */
+export type PersistedChange = SessionChange & { patch?: string }
+
+export function legacyPatch(change: SessionChange): string | undefined {
+  const patch = (change as PersistedChange).patch
+  return typeof patch === "string" && patch.length > 0 ? patch : undefined
 }
 
 export type SessionStep = {
@@ -43,6 +58,12 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value : undefined
 }
 
+/** Read a string field from an unknown record; used for tool `metadata.files` entries. */
+export function stringField(value: unknown, key: string) {
+  const object = record(value)
+  return object ? stringValue(object[key]) : undefined
+}
+
 function truncate(value: string, length = 72) {
   return value.length > length ? `${value.slice(0, length - 1)}…` : value
 }
@@ -56,10 +77,38 @@ function firstLine(value: string) {
 
 type PatchFile = {
   file: string
-  patch: string
   additions: number
   deletions: number
   status?: SessionChange["status"]
+}
+
+// ponytail: PlanPlugin writes plan documents under `<home>/.opencode/plan`; match that path
+// convention rather than plumbing the resolved directory into this client-side projection.
+function isPlanFile(file: string) {
+  const normalized = file.replaceAll("\\", "/")
+  return normalized.startsWith(".opencode/plan/") || normalized.includes("/.opencode/plan/")
+}
+
+/**
+ * Match a snapshot diff path (worktree-relative) to a change's `file` (Location-relative).
+ * A subdirectory Location prefixes the diff path, so exact match wins and a path suffix is
+ * the fallback.
+ */
+export function matchesFile(diffFile: string, changeFile: string) {
+  const target = changeFile.replaceAll("\\", "/").replace(/^\.\//, "")
+  return diffFile === target || diffFile.endsWith(`/${target}`)
+}
+
+/**
+ * A change's diff when its step is still in the client message window: the completed tool
+ * result's `metadata.files` entry for the same file. `undefined` once the message is evicted.
+ */
+export function livePatch(message: SessionMessageInfo | undefined, change: SessionChange) {
+  const content = message?.type === "assistant" ? message.content : undefined
+  const file = content
+    ?.flatMap((part) => (part.type === "tool" ? toolDisplayMetadata(part.state).files : []))
+    .find((entry) => matchesFile(stringField(entry, "file") ?? "", change.file))
+  return stringField(file, "patch")
 }
 
 /** `metadata.files` is the canonical `FileDiff.Info` list emitted by edit/patch. */
@@ -69,13 +118,11 @@ function parsePatchFiles(value: unknown): PatchFile[] {
     const file = record(item)
     if (!file) return []
     const path = stringValue(file.file)
-    const patch = stringValue(file.patch)
-    if (!path || patch === undefined) return []
+    if (!path) return []
     const status = stringValue(file.status)
     return [
       {
         file: path,
-        patch,
         additions: finiteNumber(file.additions) ?? 0,
         deletions: finiteNumber(file.deletions) ?? 0,
         status: status === "added" || status === "deleted" || status === "modified" ? status : undefined,
@@ -93,10 +140,10 @@ function changesFromTool(part: SessionMessageAssistantTool, messageID: string): 
     return files.map((file, index) => ({
       id: `${part.id}:${index}`,
       file: file.file,
-      patch: file.patch,
       additions: file.additions,
       deletions: file.deletions,
       status: file.status,
+      kind: isPlanFile(file.file) ? ("plan" as const) : undefined,
       messageID,
     }))
   }
@@ -104,7 +151,18 @@ function changesFromTool(part: SessionMessageAssistantTool, messageID: string): 
   // `write` returns output/content only; its diff is never persisted on the tool result.
   if (canonicalToolName(part.name) === "write") {
     const file = stringValue(part.state.input.path)
-    if (file) return [{ id: `${part.id}:0`, file, additions: 0, deletions: 0, messageID }]
+    if (file) {
+      return [
+        {
+          id: `${part.id}:0`,
+          file,
+          additions: 0,
+          deletions: 0,
+          kind: isPlanFile(file) ? "plan" : undefined,
+          messageID,
+        },
+      ]
+    }
   }
 
   return []
@@ -181,6 +239,10 @@ export function deriveHistory(messages: SessionMessageInfo[]): SessionPrompt[] {
  * Union-merge a freshly derived history into the accumulated one. Steps and prompts
  * are never removed: once the client message window (last ~20) drops a message, the
  * persisted copy is the only remaining record.
+ *
+ * Patches are not part of the derived projection, but a legacy row may still carry one. It is
+ * preserved as-is: only the diff is retained, never re-added, so the store ages out of the
+ * duplicated patch data as entries are replaced without forcing a refetch for old steps.
  */
 export function mergeHistory(previous: SessionPrompt[] | undefined, next: SessionPrompt[]): SessionPrompt[] {
   if (!previous?.length) return next
@@ -205,7 +267,19 @@ export function mergeHistory(previous: SessionPrompt[] | undefined, next: Sessio
       prior.label = step.label
       prior.status = step.status
       prior.reasoning = step.reasoning
+      // A legacy `patch` is preserved on the persisted object (never on the derived change
+      // shape), keyed by change id so a mixed patch/no-patch history survives re-projection.
+      const legacy = new Map(
+        prior.changes.flatMap((change) => {
+          const patch = legacyPatch(change)
+          return patch ? [[change.id, patch] as const] : []
+        }),
+      )
       prior.changes = step.changes
+      for (const change of prior.changes) {
+        const patch = legacy.get(change.id)
+        if (patch) (change as PersistedChange).patch = patch
+      }
     }
   }
   return order.map((id) => prompts.get(id)!)

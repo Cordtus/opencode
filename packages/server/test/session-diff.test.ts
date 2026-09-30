@@ -95,5 +95,14 @@ it.live("serves turn diffs by user message with range validation", () =>
       body: { _tag: "MessageNotFoundError" },
     })
     expect((yield* request(`/api/session/${Session.ID.create()}/diff`)).status).toBe(404)
+
+    // Step diffs key on the assistant message; a user message has no step range.
+    const stepDiff = (messageID: SessionMessage.ID) => request(`/api/session/${sessionID}/step/${messageID}/diff`)
+    expect(yield* stepDiff(ids.assistant)).toEqual({ status: 200, body: { data: [] } })
+    expect(yield* stepDiff(ids.user)).toEqual({ status: 200, body: { data: [] } })
+    expect(yield* stepDiff(SessionMessage.ID.create())).toMatchObject({
+      status: 404,
+      body: { _tag: "MessageNotFoundError" },
+    })
   }),
 )

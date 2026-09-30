@@ -530,6 +530,28 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.step.diff",
+        Effect.fn(function* (ctx) {
+          return {
+            data: yield* session
+              .stepDiff({
+                sessionID: ctx.params.sessionID,
+                messageID: ctx.params.messageID,
+                context: ctx.query.context,
+              })
+              .pipe(
+                Effect.catchTag("Session.NotFoundError", missingSession),
+                Effect.catchTag("Session.MessageNotFoundError", missingMessage),
+                Effect.catchTag(
+                  "Session.TurnRangeError",
+                  (error) => new InvalidRequestError({ message: error.message, field: error.field }),
+                ),
+                Effect.catchTag("Snapshot.Error", failedSnapshot("diff session step", ctx.params.sessionID)),
+              ),
+          }
+        }),
+      )
+      .handle(
         "session.inbox.list",
         Effect.fn(function* (ctx) {
           return {

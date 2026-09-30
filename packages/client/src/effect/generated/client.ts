@@ -71,6 +71,8 @@ import type {
   SessionContextOutput,
   SessionDiffInput,
   SessionDiffOutput,
+  SessionStepDiffInput,
+  SessionStepDiffOutput,
   SessionInboxListInput,
   SessionInboxListOutput,
   SessionInboxCancelInput,
@@ -608,6 +610,17 @@ const EndpointSessionDiff = (raw: RawClient["server.session"]) => (input: Sessio
     ),
   )
 
+const EndpointSessionStepDiff = (raw: RawClient["server.session"]) => (input: SessionStepDiffInput) =>
+  preserveEffect<SessionStepDiffOutput>()(
+    raw["session.step.diff"]({
+      params: { sessionID: input["sessionID"], messageID: input["messageID"] },
+      query: { context: input["context"] },
+    }).pipe(
+      Effect.mapError(mapClientError),
+      Effect.map((value) => value.data),
+    ),
+  )
+
 const EndpointSessionInboxList = (raw: RawClient["server.session"]) => (input: SessionInboxListInput) =>
   preserveEffect<SessionInboxListOutput>()(
     raw["session.inbox.list"]({ params: { sessionID: input["sessionID"] } }).pipe(
@@ -783,6 +796,7 @@ const adaptGroupSession = (raw: RawClient["server.session"]) => ({
   },
   context: EndpointSessionContext(raw),
   diff: EndpointSessionDiff(raw),
+  step: { diff: EndpointSessionStepDiff(raw) },
   inbox: {
     list: EndpointSessionInboxList(raw),
     cancel: EndpointSessionInboxCancel(raw),

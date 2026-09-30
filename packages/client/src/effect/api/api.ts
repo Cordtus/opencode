@@ -367,6 +367,16 @@ export type SessionDiffInput = {
 export type SessionDiffOutput = ReadonlyArray<FileDiff.Info>
 export type SessionDiffOperation<E = never> = (input: SessionDiffInput) => Effect.Effect<SessionDiffOutput, E>
 
+export type SessionStepDiffInput = {
+  readonly sessionID: Session.ID
+  readonly messageID: SessionMessage.ID
+  readonly context?: number | undefined
+}
+export type SessionStepDiffOutput = ReadonlyArray<FileDiff.Info>
+export type SessionStepDiffOperation<E = never> = (
+  input: SessionStepDiffInput,
+) => Effect.Effect<SessionStepDiffOutput, E>
+
 export type SessionInboxListInput = { readonly sessionID: Session.ID }
 export type SessionInboxListOutput = ReadonlyArray<SessionInbox.Info>
 export type SessionInboxListOperation<E = never> = (
@@ -1461,6 +1471,7 @@ export interface SessionApi<E = never> {
   }
   readonly context: SessionContextOperation<E>
   readonly diff: SessionDiffOperation<E>
+  readonly step: { readonly diff: SessionStepDiffOperation<E> }
   readonly inbox: {
     readonly list: SessionInboxListOperation<E>
     readonly cancel: SessionInboxCancelOperation<E>

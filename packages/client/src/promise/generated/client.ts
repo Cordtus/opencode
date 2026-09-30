@@ -65,6 +65,8 @@ import type {
   SessionContextOutput,
   SessionDiffInput,
   SessionDiffOutput,
+  SessionStepDiffInput,
+  SessionStepDiffOutput,
   SessionInboxListInput,
   SessionInboxListOutput,
   SessionInboxCancelInput,
@@ -872,6 +874,20 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      step: {
+        diff: (input: SessionStepDiffInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionStepDiffOutput }>(
+            {
+              method: "GET",
+              path: `/api/session/${encodeURIComponent(input.sessionID)}/step/${encodeURIComponent(input.messageID)}/diff`,
+              query: { context: input["context"] },
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404, 500],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+      },
       inbox: {
         list: (input: SessionInboxListInput, requestOptions?: RequestOptions) =>
           request<{ readonly data: SessionInboxListOutput }>(

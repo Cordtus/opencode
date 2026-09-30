@@ -32,14 +32,39 @@ Rendering reads the accumulated store, not `message.list()`.
 The projection grows as the transcript's own pagination loads older pages; there is no eager full-session fetch, so
 opening a session does not issue extra message requests.
 
-Change data comes from `metadata.files` (the canonical `FileDiff.Info`: `file`, `patch`, `additions`, `deletions`,
-`status`). `write` returns only `output`/`content` and never persists a diff, so a `write` change has no patch and no
-reported status; the panel shows "No diff available for this change." for it. Only completed tool calls contribute changes.
+Change identity comes from `metadata.files` (the canonical `FileDiff.Info`: `file`, `additions`, `deletions`, `status`).
+The patch is **not** stored: the snapshot repository already holds it, so the durable projection keeps only session context
+(which step, which file, counts, plan tag). `write` returns only `output`/`content` and never persists a diff, so a `write`
+change has no reported status. Only completed tool calls contribute changes.
+
+The diff itself is loaded on selection from `session.step.diff`
+(`GET /api/session/:sessionID/step/:messageID/diff`, backed by `SessionDiff.step`), which compares the assistant message's
+own `snapshot.start`→`snapshot.end` trees. That is exact per-step attribution: sibling steps are never merged, so a project
+commit that bundles several steps does not blur them. A step still running compares against the working copy; a session
+predating snapshots yields no diffs. A change's `file` is Location-relative while a snapshot diff path is worktree-relative,
+so the panel matches exact first and falls back to a path suffix for subdirectory Locations. Diffs are resolved in order
+without duplication: a legacy stored `patch` (`/redo` restores one), then the live tool result's `metadata.files` when the
+step is still in the client window, then `session.step.diff` for an evicted step. A step whose start-to-end range crosses a
+location switch is rejected (the snapshots live in different repositories) and shows no diff. `mergeHistory` preserves a
+legacy `patch` on the persisted change, keyed by change id instead of array position, so old sessions keep their diffs and
+the store still ages out of the duplicated patch data as entries are replaced — no migration needed.
+
+### Without git
+
+Snapshot capture requires a git Location, so a non-git project has no snapshot repository and no per-step range. The tree
+still derives from `metadata.files` as before, and the panel shows a diff whenever the change carries a stored `patch` or the
+step is still in the client window; only an evicted step in a non-git project reports "No diff available for this change."
+(Plan changes never have a snapshot diff — plan documents live outside the worktree, so they are not in the captured tree.)
+
+A change whose file lives under the Plan agent's document directory (`<home>/.opencode/plan/`) is tagged `kind: "plan"`.
+Read-only work can still update a plan, so a plan edit is the only change a read-only step can produce; the tag lets the
+tree and detail header distinguish it from a code change. Detection matches the path convention, not a resolved directory,
+because the projection is client-side.
 
 ## Components
 
 - `feature-plugins/system/changes-model.ts` — pure `deriveHistory(messages)` and `mergeHistory(previous, next)`; change
-  extraction from `metadata.files`, with a patchless fallback for `write`.
+  extraction from `metadata.files`, with a path fallback for `write`.
 - `feature-plugins/system/changes.tsx` — the `opencode.changes` built-in plugin:
   - `append` on `app` → `History` (accumulates the durable projection) and `Commands` (registers `session.changes`, keybind
     `<leader>d`, slash `/changes`).
@@ -49,6 +74,11 @@ reported status; the panel shows "No diff available for this change." for it. On
 
 Selection and expansion live in the plugin memory store (`context.storage.memory("state")`), shared between the sidebar and
 the panel and surviving hot reloads. Prompts default expanded, steps default collapsed.
+
+A step is only expandable when it actually produced a change. Read-only steps (a tool call that made no file modification)
+keep their disclosure arrow but render it in `text.formfield.disabled` and ignore the toggle, so the tree distinguishes
+"this step did work" from "this step produced changes" without hiding the step. The panel never shows a "no changes" empty
+state: an expanded step always has at least one change to list.
 
 ## Presentation
 
@@ -83,3 +113,10 @@ See `dev-docs/local-development.md` (`opencode-local`).
   architecture after confirming V2 has no todo model.
 - 2026-09-29: Steps no longer vanish. The tree is now an accumulated, disk-backed projection (`deriveHistory` +
   `mergeHistory`) nested as session → prompt → step → change, because the client only windows the last ~20 messages.
+- 2026-09-30: Read-only steps keep a greyed, inert disclosure arrow instead of expanding to an empty "no changes" state;
+  only steps that produced a change expand.
+- 2026-09-30: Plan-directory edits are tagged `kind: "plan"` and rendered with a `plan` marker so a read-only step's only
+  possible change is identifiable.
+- 2026-09-30: Stopped persisting patches. Diffs load on selection from the new step-scoped snapshot endpoint
+  (`session.step.diff`), so history stores only session context and never duplicates snapshot/git data. Exact per-step
+  attribution because each step has its own start/end snapshot; project commit boundaries are irrelevant.

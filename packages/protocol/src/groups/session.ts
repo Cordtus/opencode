@@ -170,12 +170,10 @@ export const SessionsQuery = Schema.Struct({
   cursor: SessionsQueryCursor.pipe(Schema.optional),
 }).annotate({ identifier: "SessionsQuery" })
 
-export const makeSessionGroup = <
-  I extends HttpApiMiddleware.AnyId,
-  S,
-  FormI extends HttpApiMiddleware.AnyId,
-  FormS,
->(sessionLocationMiddleware: Context.Key<I, S>, formLocationMiddleware: Context.Key<FormI, FormS>) =>
+export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S, FormI extends HttpApiMiddleware.AnyId, FormS>(
+  sessionLocationMiddleware: Context.Key<I, S>,
+  formLocationMiddleware: Context.Key<FormI, FormS>,
+) =>
   HttpApiGroup.make("server.session")
     .add(
       HttpApiEndpoint.get("session.list", "/api/session", {
@@ -559,9 +557,7 @@ export const makeSessionGroup = <
         error: [SessionNotFoundError, SessionBusyError],
       })
         .middleware(sessionLocationMiddleware)
-        .annotateMerge(
-          OpenApi.annotations({ identifier: "session.revert.commit", summary: "Commit staged revert" }),
-        ),
+        .annotateMerge(OpenApi.annotations({ identifier: "session.revert.commit", summary: "Commit staged revert" })),
     )
     .add(
       HttpApiEndpoint.get("session.context", "/api/session/:sessionID/context", {
@@ -598,6 +594,25 @@ export const makeSessionGroup = <
           summary: "Diff session turns",
           description:
             "Structured per-file diffs of the files a turn changed. A turn runs from the first prompt after the session was last idle until its next idle marker, so prompts steered in while it was busy belong to the same turn; `to` extends the range through a later turn. Compares the range's first recorded snapshot with its last; a step still running in the active session compares against the working copy. Ranges that span a location change are rejected. In sessions without any idle marker, a prompt's turn spans until the next user message.",
+        }),
+      ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.step.diff", "/api/session/:sessionID/step/:messageID/diff", {
+        params: { sessionID: Session.ID, messageID: SessionMessage.ID },
+        query: Schema.Struct({
+          context: Schema.NumberFromString.pipe(Schema.decodeTo(NonNegativeInt), Schema.optional).annotate({
+            description: "Unchanged lines around each hunk. Omit for full-file patches.",
+          }),
+        }),
+        success: Schema.Struct({ data: Schema.Array(FileDiff.Info) }),
+        error: [InvalidRequestError, MessageNotFoundError, SessionNotFoundError, UnknownError],
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "session.step.diff",
+          summary: "Diff one step",
+          description:
+            "Structured per-file diffs of the files a single assistant step changed, comparing the step's own recorded start and end snapshots so every change is attributed to exactly the step that produced it. A step still running in the active session compares against the working copy. A message that is not an assistant step, or that predates snapshots, yields no diffs. A step whose start-to-end range spans a location change is rejected, because the snapshots live in different repositories.",
         }),
       ),
     )
