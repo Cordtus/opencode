@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test"
 import { RGBA } from "@opentui/core"
 import { testRender } from "@opentui/solid"
+import { createStore, produce } from "solid-js/store"
 import type { SessionMessageInfo } from "@opencode/client"
 import type { Context } from "@opencode/plugin/tui/context"
 import { TaskTree } from "../../src/feature-plugins/system/changes"
@@ -43,6 +44,7 @@ function context(expanded: Record<string, boolean> = {}) {
   const feedback = { base: color, muted: color }
   // Seed the accumulated history the tree renders from.
   const history = { sessions: { session: deriveHistory(messages) } }
+  const [state, setState] = createStore<{ expanded: Record<string, boolean> }>({ expanded })
   return {
     theme: {
       text: {
@@ -60,13 +62,17 @@ function context(expanded: Record<string, boolean> = {}) {
     ui: { panel: { open: () => true } },
     storage: {
       store: () => [history, () => {}],
-      memory: (_key: string, options: { initial: unknown }) => [{ ...(options.initial as object), expanded }, () => {}],
+      memory: () => [
+        state,
+        (mutation: (draft: { expanded: Record<string, boolean> }) => void) => setState(produce(mutation)),
+      ],
     },
   } as unknown as Context
 }
 
-test("task tree nests steps under prompts", async () => {
-  const app = await testRender(() => <TaskTree context={context()} sessionID="session" />, { width: 48, height: 12 })
+test("task tree nests change-bearing steps under prompts", async () => {
+  const ctx = context()
+  const app = await testRender(() => <TaskTree context={ctx} sessionID="session" />, { width: 48, height: 12 })
 
   try {
     await app.renderOnce()
@@ -74,23 +80,26 @@ test("task tree nests steps under prompts", async () => {
     expect(frame).toContain("Changes")
     expect(frame).toContain("Fix the parser")
     expect(frame).toContain("Refactor the parser")
-    expect(frame).toContain("Inspect the parser")
+    // A step that only read files produced no change and must not appear.
+    expect(frame).not.toContain("Inspect the parser")
   } finally {
     app.renderer.destroy()
   }
 })
 
-test("a step with no changes cannot expand even if it was previously expanded", async () => {
-  // The read-only step's expansion state is stale-true; it must stay collapsed because it has
-  // no changes, so the old "No changes recorded." fallback must never render.
-  const app = await testRender(() => <TaskTree context={context({ m2: true })} sessionID="session" />, {
-    width: 48,
-    height: 12,
-  })
+test("clicking a step arrow expands its changes", async () => {
+  const ctx = context()
+  const app = await testRender(() => <TaskTree context={ctx} sessionID="session" />, { width: 48, height: 12 })
 
   try {
     await app.renderOnce()
-    expect(app.captureCharFrame()).not.toContain("No changes recorded.")
+    const row = app
+      .captureCharFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("Refactor the parser"))
+    await app.mockMouse.click(2, row)
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("src/parser.ts")
   } finally {
     app.renderer.destroy()
   }

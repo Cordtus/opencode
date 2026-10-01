@@ -15,6 +15,7 @@ import {
   mergeHistory,
   type SessionChange,
   type SessionPrompt,
+  type SessionStep,
 } from "./changes-model"
 
 type Selection = { sessionID: string; changeID: string }
@@ -94,7 +95,14 @@ function History(props: { context: Plugin.Context }) {
 export function TaskTree(props: { context: Plugin.Context; sessionID: string }) {
   const theme = () => props.context.theme
   const history = props.context.storage.store<HistoryStore>("history", HistoryStoreOptions)
-  const prompts = () => history[0].sessions[props.sessionID] ?? []
+  // Render only change-bearing steps. History may still hold rows written before this rule
+  // (or a step still in flight), so filter here rather than trusting the persisted shape.
+  const prompts = createMemo(() =>
+    (history[0].sessions[props.sessionID] ?? []).flatMap((prompt) => {
+      const steps = prompt.steps.filter((step) => step.changes.length > 0)
+      return steps.length > 0 ? [{ ...prompt, steps }] : []
+    }),
+  )
   const memory = props.context.storage.memory<ChangesMemory>("state", MemoryOptions)[0]
   const update = props.context.storage.memory<ChangesMemory>("state", MemoryOptions)[1]
 
@@ -138,23 +146,11 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
                   <box paddingLeft={2}>
                     <Index each={prompt().steps}>
                       {(step) => {
-                        // Only a step that produced a change can expand; read-only steps keep a
-                        // greyed, inert arrow so they are still visibly present but not "changes".
-                        const expandable = () => step().changes.length > 0
-                        const stepExpanded = () => expandable() && (memory.expanded[step().id] ?? false)
+                        const stepExpanded = () => memory.expanded[step().id] ?? false
                         return (
                           <box>
-                            <box
-                              flexDirection="row"
-                              gap={1}
-                              onMouseDown={() => {
-                                if (expandable()) toggle(step().id, false)
-                              }}
-                            >
-                              <text
-                                flexShrink={0}
-                                fg={expandable() ? levelColor(theme(), 1) : theme().text.formfield.disabled}
-                              >
+                            <box flexDirection="row" gap={1} onMouseDown={() => toggle(step().id, false)}>
+                              <text flexShrink={0} fg={levelColor(theme(), 1)}>
                                 {stepExpanded() ? "▼" : "▶"}
                               </text>
                               <text flexShrink={0} fg={statusColor(theme(), step().status)}>
@@ -222,7 +218,7 @@ export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput
   const { currentSyntax } = useThemes()
   const history = props.context.storage.store<HistoryStore>("history", HistoryStoreOptions)
   const memory = props.context.storage.memory<ChangesMemory>("state", MemoryOptions)[0]
-  const current = createMemo(() => {
+  const current = createMemo<{ step: SessionStep; change: SessionChange } | undefined>(() => {
     const selection = memory.selection
     if (!selection || selection.sessionID !== props.input.sessionID) return
     for (const prompt of history[0].sessions[props.input.sessionID] ?? []) {

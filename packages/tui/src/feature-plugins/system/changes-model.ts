@@ -59,7 +59,7 @@ function stringValue(value: unknown) {
 }
 
 /** Read a string field from an unknown record; used for tool `metadata.files` entries. */
-export function stringField(value: unknown, key: string) {
+function stringField(value: unknown, key: string) {
   const object = record(value)
   return object ? stringValue(object[key]) : undefined
 }
@@ -186,8 +186,8 @@ function promptLabel(message: SessionMessageUser, index: number) {
  * changes to. The closest durable unit is the logical step = one assistant message
  * (`SessionMessageAssistant`), nested under the user prompt that started it.
  *
- * Steps without changes are kept once seen (a "Step 5" that appeared must not vanish
- * when it completes), so the projection is a growing history rather than a live filter.
+ * Only steps that produced a change are projected; a step that merely read, ran a
+ * command, or thought is not a change and must not appear in the tree.
  */
 export function deriveHistory(messages: SessionMessageInfo[]): SessionPrompt[] {
   const prompts: SessionPrompt[] = []
@@ -214,13 +214,13 @@ export function deriveHistory(messages: SessionMessageInfo[]): SessionPrompt[] {
     if (message.type !== "assistant") continue
 
     const changes = message.content.flatMap((part) => (part.type === "tool" ? changesFromTool(part, message.id) : []))
+    // A step with no file-producing change is not a change: it would only add an inert,
+    // unexpandable row. Keep the tree to steps that actually produced something.
+    if (changes.length === 0) continue
     const reasoning = message.content
       .flatMap((part) => (part.type === "reasoning" ? [part.text] : []))
       .filter(Boolean)
       .join("\n\n")
-    const hasTool = message.content.some((part) => part.type === "tool")
-    // Keep only steps that did something: a change, a thought, or a tool call.
-    if (changes.length === 0 && !reasoning && !hasTool) continue
 
     stepIndex++
     ensurePrompt().steps.push({
@@ -232,13 +232,14 @@ export function deriveHistory(messages: SessionMessageInfo[]): SessionPrompt[] {
     })
   }
 
-  return prompts
+  return prompts.filter((prompt) => prompt.steps.length > 0)
 }
 
 /**
- * Union-merge a freshly derived history into the accumulated one. Steps and prompts
- * are never removed: once the client message window (last ~20) drops a message, the
- * persisted copy is the only remaining record.
+ * Union-merge a freshly derived history into the accumulated one. Steps that produced a
+ * change and prompts that contain them are never removed: once the client message window
+ * (last ~20) drops a message, the persisted copy is the only remaining record. A step with
+ * no change is dropped here so history written before this rule ages out of the tree.
  *
  * Patches are not part of the derived projection, but a legacy row may still carry one. It is
  * preserved as-is: only the diff is retained, never re-added, so the store ages out of the
@@ -252,6 +253,7 @@ export function mergeHistory(previous: SessionPrompt[] | undefined, next: Sessio
   for (const incoming of next) {
     const existing = prompts.get(incoming.id)
     if (!existing) {
+      if (incoming.steps.length === 0) continue
       prompts.set(incoming.id, incoming)
       order.push(incoming.id)
       continue
@@ -281,6 +283,12 @@ export function mergeHistory(previous: SessionPrompt[] | undefined, next: Sessio
         if (patch) (change as PersistedChange).patch = patch
       }
     }
+    existing.steps = existing.steps.filter((step) => step.changes.length > 0)
   }
-  return order.map((id) => prompts.get(id)!)
+  return order
+    .map((id) => prompts.get(id)!)
+    .flatMap((prompt) => {
+      const steps = prompt.steps.filter((step) => step.changes.length > 0)
+      return steps.length > 0 ? [{ ...prompt, steps }] : []
+    })
 }

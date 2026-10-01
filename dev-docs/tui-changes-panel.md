@@ -11,7 +11,9 @@ sidebar todo plugin is gone. There is no plan to attach changes to.
 
 The closest durable unit is the **logical step = one assistant message** (`SessionMessageAssistant`). A step's changes are
 the `edit` / `write` / `patch` tool calls in that message's `content`; its reasoning is the message's reasoning parts.
-`deriveHistory` in `packages/tui/src/feature-plugins/system/changes-model.ts` does this purely and is unit-tested.
+Only steps that produced a change are projected — a step that only read, ran a command, or thought is not a change and is
+omitted, along with any prompt left with no such steps. `deriveHistory` in
+`packages/tui/src/feature-plugins/system/changes-model.ts` does this purely and is unit-tested.
 
 ### Hierarchy
 
@@ -21,13 +23,13 @@ the `edit` / `write` / `patch` tool calls in that message's `content`; its reaso
 
 The client only holds a window of recent messages (`messagePageLimit = 20` in `packages/client/src/solid/data.ts`) and
 `evictSession` deletes messages for non-retained sessions. Deriving the tree directly from `message.list()` therefore lost
-steps as a session grew ("Step 5" appearing then vanishing and being unrecoverable), and completed steps with no changes
-were filtered out.
+steps as a session grew ("Step 5" appearing then vanishing and being unrecoverable).
 
 Instead a `History` component (also on the `app` slot) derives the current session and **union-merges** it into a
 disk-backed `storage.store("history")`, debounced ~600ms because reasoning streams token-by-token. `mergeHistory` never
-removes prompts or steps, so the tree is a growing, persistent history that survives the client window and restarts.
-Rendering reads the accumulated store, not `message.list()`.
+removes a change-bearing prompt or step, so the tree is a growing, persistent history that survives the client window and
+restarts; it drops steps that produced no change so rows written before this rule age out. Rendering reads the accumulated
+store, not `message.list()`.
 
 The projection grows as the transcript's own pagination loads older pages; there is no eager full-session fetch, so
 opening a session does not issue extra message requests.
@@ -71,14 +73,15 @@ because the projection is client-side.
   - `prepend` on `sidebar.content` → `TaskTree` (prompt → step → change; click a change to select).
   - `append` on `session.panel` → `ChangeDetail` (diff top half, reasoning bottom half, both scrollable; Undo).
 - Registered in `plugin/builtins.ts`; keybind default in `config/keybind.ts`.
+- `ChangeDetail`'s on-demand diff resolution is covered by `test/feature-plugins/changes-detail.test.tsx`
+  (the step endpoint path and the legacy-patch short circuit); the tree and model have their own tests.
 
 Selection and expansion live in the plugin memory store (`context.storage.memory("state")`), shared between the sidebar and
 the panel and surviving hot reloads. Prompts default expanded, steps default collapsed.
 
-A step is only expandable when it actually produced a change. Read-only steps (a tool call that made no file modification)
-keep their disclosure arrow but render it in `text.formfield.disabled` and ignore the toggle, so the tree distinguishes
-"this step did work" from "this step produced changes" without hiding the step. The panel never shows a "no changes" empty
-state: an expanded step always has at least one change to list.
+Every rendered step produced a change, so every step's disclosure arrow expands to at least one change; the tree never
+shows a "no changes" empty state and never shows an inert arrow. `TaskTree` filters the persisted history to change-bearing
+steps (and drops prompts left empty) as a second guard, because the store may still hold rows written before this rule.
 
 ## Presentation
 
@@ -115,6 +118,8 @@ See `dev-docs/local-development.md` (`opencode-local`).
   `mergeHistory`) nested as session → prompt → step → change, because the client only windows the last ~20 messages.
 - 2026-09-30: Read-only steps keep a greyed, inert disclosure arrow instead of expanding to an empty "no changes" state;
   only steps that produced a change expand.
+- 2026-09-30: Reversed the inert-arrow rule. Steps and prompts that produced no change are hidden entirely rather than shown
+  greyed; `deriveHistory` and `mergeHistory` drop them, so the tree shows only expandable steps.
 - 2026-09-30: Plan-directory edits are tagged `kind: "plan"` and rendered with a `plan` marker so a read-only step's only
   possible change is identifiable.
 - 2026-09-30: Stopped persisting patches. Diffs load on selection from the new step-scoped snapshot endpoint

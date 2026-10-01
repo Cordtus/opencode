@@ -6,6 +6,7 @@ import {
   livePatch,
   matchesFile,
   mergeHistory,
+  type PersistedChange,
   type SessionPrompt,
 } from "../../src/feature-plugins/system/changes-model"
 
@@ -36,7 +37,7 @@ describe("changes-model.deriveHistory", () => {
         }),
       ]),
       user("u2", "Now add tests"),
-      assistant("m2", [text("Adding tests")]),
+      assistant("m2", [text("Adding tests"), tool("write", {}, { path: "src/parser.test.ts" })]),
     ])
 
     expect(prompts.map((prompt) => prompt.id)).toEqual(["u1", "u2"])
@@ -55,11 +56,10 @@ describe("changes-model.deriveHistory", () => {
     })
   })
 
-  test("keeps a completed step that produced no changes", () => {
+  test("drops a completed step that produced no changes", () => {
     const prompts = deriveHistory([user("u1", "Do work"), assistant("m1", [tool("bash", {})], { completed: 2 })])
 
-    expect(prompts[0].steps).toHaveLength(1)
-    expect(prompts[0].steps[0].changes).toHaveLength(0)
+    expect(prompts).toHaveLength(0)
   })
 
   test("falls back to the tool input path for a write with no metadata", () => {
@@ -114,15 +114,26 @@ describe("changes-model.matchesFile", () => {
 })
 
 describe("changes-model.mergeHistory", () => {
+  const changed = (id: string, messageID = id) => ({
+    id: `${id}:0`,
+    file: "src/a.ts",
+    additions: 1,
+    deletions: 1,
+    messageID,
+  })
   test("retains steps the client window no longer reports", () => {
     const previous: SessionPrompt[] = [
-      { id: "u1", label: "First", steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "r", changes: [] }] },
+      {
+        id: "u1",
+        label: "First",
+        steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "r", changes: [changed("m1")] }],
+      },
     ]
     const next: SessionPrompt[] = [
       {
         id: "u1",
         label: "First",
-        steps: [{ id: "m2", label: "Step 2", status: "running", reasoning: "", changes: [] }],
+        steps: [{ id: "m2", label: "Step 2", status: "running", reasoning: "", changes: [changed("m2")] }],
       },
     ]
 
@@ -130,19 +141,52 @@ describe("changes-model.mergeHistory", () => {
     expect(merged[0].steps.map((step) => step.id)).toEqual(["m1", "m2"])
   })
 
-  test("updates an existing step in place", () => {
+  test("drops steps that produced no change", () => {
     const previous: SessionPrompt[] = [
       {
         id: "u1",
         label: "First",
-        steps: [{ id: "m1", label: "Step 1", status: "running", reasoning: "a", changes: [] }],
+        steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "r", changes: [] }],
       },
     ]
     const next: SessionPrompt[] = [
       {
         id: "u1",
         label: "First",
-        steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "a b", changes: [] }],
+        steps: [{ id: "m2", label: "Step 2", status: "done", reasoning: "", changes: [changed("m2")] }],
+      },
+    ]
+
+    const merged = mergeHistory(previous, next)
+    expect(merged.map((prompt) => prompt.id)).toEqual(["u1"])
+    expect(merged[0].steps.map((step) => step.id)).toEqual(["m2"])
+  })
+
+  test("drops a prompt whose only steps produced no change", () => {
+    const previous: SessionPrompt[] = [
+      {
+        id: "u1",
+        label: "First",
+        steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "r", changes: [] }],
+      },
+    ]
+
+    expect(mergeHistory(previous, [])).toEqual([])
+  })
+
+  test("updates an existing step in place", () => {
+    const previous: SessionPrompt[] = [
+      {
+        id: "u1",
+        label: "First",
+        steps: [{ id: "m1", label: "Step 1", status: "running", reasoning: "a", changes: [changed("m1")] }],
+      },
+    ]
+    const next: SessionPrompt[] = [
+      {
+        id: "u1",
+        label: "First",
+        steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "a b", changes: [changed("m1")] }],
       },
     ]
 
@@ -153,7 +197,7 @@ describe("changes-model.mergeHistory", () => {
   })
 
   test("preserves a legacy stored patch while replacing the change shape", () => {
-    const change = (patch?: string) => ({
+    const change = (patch?: string): PersistedChange => ({
       id: "tool:0",
       file: "src/a.ts",
       ...(patch === undefined ? {} : { patch }),
@@ -161,30 +205,28 @@ describe("changes-model.mergeHistory", () => {
       deletions: 3,
       messageID: "m1",
     })
-    const previous = [
+    const previous: SessionPrompt[] = [
       {
         id: "u1",
         label: "First",
-        steps: [
-          { id: "m1", label: "Step 1", status: "running", reasoning: "r", changes: [change("@@ old @@") as never] },
-        ],
+        steps: [{ id: "m1", label: "Step 1", status: "running", reasoning: "r", changes: [change("@@ old @@")] }],
       },
-    ] as SessionPrompt[]
-    const next = [
+    ]
+    const next: SessionPrompt[] = [
       {
         id: "u1",
         label: "First",
-        steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "r", changes: [change() as never] }],
+        steps: [{ id: "m1", label: "Step 1", status: "done", reasoning: "r", changes: [change()] }],
       },
-    ] as SessionPrompt[]
+    ]
 
     const merged = mergeHistory(previous, next)
-    expect((merged[0].steps[0].changes[0] as { patch?: string }).patch).toBe("@@ old @@")
+    expect((merged[0].steps[0].changes[0] as PersistedChange).patch).toBe("@@ old @@")
     expect(merged[0].steps[0].status).toBe("done")
   })
 
   test("keys a preserved legacy patch by change id, never by position", () => {
-    const change = (id: string, file: string, patch?: string) => ({
+    const change = (id: string, file: string, patch?: string): PersistedChange => ({
       id,
       file,
       ...(patch === undefined ? {} : { patch }),
@@ -194,7 +236,7 @@ describe("changes-model.mergeHistory", () => {
     })
     // A `write` (no patch) precedes an `edit` (patch): positional copying would put the edit's
     // patch on the write's change.
-    const previous = [
+    const previous: SessionPrompt[] = [
       {
         id: "u1",
         label: "First",
@@ -204,15 +246,12 @@ describe("changes-model.mergeHistory", () => {
             label: "Step 1",
             status: "done",
             reasoning: "r",
-            changes: [
-              change("tool-write:0", "src/new.ts") as never,
-              change("tool-edit:0", "src/a.ts", "@@ a @@") as never,
-            ],
+            changes: [change("tool-write:0", "src/new.ts"), change("tool-edit:0", "src/a.ts", "@@ a @@")],
           },
         ],
       },
-    ] as SessionPrompt[]
-    const next = [
+    ]
+    const next: SessionPrompt[] = [
       {
         id: "u1",
         label: "First",
@@ -222,7 +261,7 @@ describe("changes-model.mergeHistory", () => {
             label: "Step 1",
             status: "done",
             reasoning: "r",
-            changes: [change("tool-edit:0", "src/a.ts") as never, change("tool-write:0", "src/new.ts") as never],
+            changes: [change("tool-edit:0", "src/a.ts"), change("tool-write:0", "src/new.ts")],
           },
         ],
       },
@@ -230,7 +269,7 @@ describe("changes-model.mergeHistory", () => {
 
     const merged = mergeHistory(previous, next)
     const patches = Object.fromEntries(
-      merged[0].steps[0].changes.map((item) => [item.id, (item as { patch?: string }).patch]),
+      merged[0].steps[0].changes.map((item) => [item.id, (item as PersistedChange).patch]),
     )
     expect(patches).toEqual({ "tool-edit:0": "@@ a @@", "tool-write:0": undefined })
   })
