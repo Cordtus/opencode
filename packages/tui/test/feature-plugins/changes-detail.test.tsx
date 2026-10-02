@@ -40,9 +40,19 @@ function messages() {
   ] as unknown as SessionMessageInfo[]
 }
 
+type DiffList = Array<{ file: string; patch: string }>
+
 function context(
-  stepDiff: (input: { sessionID: string; messageID: string }) => Promise<Array<{ file: string; patch: string }>>,
+  stepDiff: (input: { sessionID: string; messageID: string; context?: number }) => Promise<DiffList>,
   change?: PersistedChange,
+  workingDiff: (input: {
+    location: unknown
+    mode: string
+    context?: number
+  }) => Promise<{ data: DiffList }> = async () => ({
+    data: [],
+  }),
+  provider = "git",
 ) {
   const color = RGBA.fromInts(200, 200, 200)
   const feedback = { base: color, muted: color }
@@ -75,7 +85,7 @@ function context(
     theme,
     data: {
       location: {
-        vcs: { info: () => ({ provider: "git" }) },
+        vcs: { info: () => ({ provider }) },
         default: () => location,
       },
       session: {
@@ -83,7 +93,7 @@ function context(
         message: { get: () => undefined },
       },
     },
-    client: { session: { step: { diff: stepDiff } } },
+    client: { session: { step: { diff: stepDiff } }, vcs: { diff: workingDiff } },
     storage: {
       store: () => [history, () => {}],
       memory: () => [
@@ -120,18 +130,58 @@ function render(ctx: Context) {
 }
 
 test("loads a change's diff from the step endpoint on selection", async () => {
-  const calls: string[] = []
+  const calls: Array<{ messageID: string; context?: number }> = []
   const ctx = context(async (query) => {
-    calls.push(query.messageID)
+    calls.push({ messageID: query.messageID, context: query.context })
     return [{ file: "src/parser.ts", patch: "@@ -1 +1 @@\n-old line\n+new line" }]
   })
   const app = await render(ctx)
   try {
     await app.waitForFrame((frame) => frame.includes("new line"))
-    expect(calls).toEqual(["m1"])
+    // A bounded context keeps a change in a large file from rendering the whole file.
+    expect(calls).toEqual([{ messageID: "m1", context: 3 }])
     const frame = app.captureCharFrame()
     expect(frame).toContain("src/parser.ts")
     expect(frame).toContain("I will rewrite the parse loop.")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("falls back to the working-tree diff when the step diff has no match", async () => {
+  const calls: Array<{ mode: string; context?: number }> = []
+  const ctx = context(
+    async () => [],
+    undefined,
+    async (input) => {
+      calls.push({ mode: input.mode, context: input.context })
+      return { data: [{ file: "packages/tui/src/parser.ts", patch: "@@ -1 +1 @@\n-gone\n+working" }] }
+    },
+  )
+  const app = await render(ctx)
+  try {
+    await app.waitForFrame((frame) => frame.includes("working"))
+    expect(calls).toEqual([{ mode: "working", context: 3 }])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("reports no diff in a non-git project without calling the git fallback", async () => {
+  let working = 0
+  const ctx = context(
+    async () => [],
+    undefined,
+    async () => {
+      working++
+      return { data: [] }
+    },
+    "none",
+  )
+  const app = await render(ctx)
+  try {
+    await app.waitForFrame((frame) => frame.includes("No diff available"))
+    expect(working).toBe(0)
   } finally {
     app.renderer.destroy()
   }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { SessionMessageInfo } from "@opencode/client"
 import {
   deriveHistory,
+  diffPatch,
   legacyPatch,
   livePatch,
   matchesFile,
@@ -110,6 +111,27 @@ describe("changes-model.matchesFile", () => {
     expect(matchesFile("packages/tui/src/other.ts", "src/parser.ts")).toBe(false)
     // A suffix match must respect the path segment boundary.
     expect(matchesFile("src/notparser.ts", "parser.ts")).toBe(false)
+  })
+})
+
+describe("changes-model.diffPatch", () => {
+  const change = { id: "tool:0", file: "src/a.ts", additions: 1, deletions: 1, messageID: "m1" }
+
+  test("prefers an exact Location-relative match over a suffix match", () => {
+    const diffs = [
+      { file: "packages/tui/src/a.ts", patch: "@@ suffix @@" },
+      { file: "src/a.ts", patch: "@@ exact @@" },
+    ]
+    expect(diffPatch(diffs, change)).toBe("@@ exact @@")
+  })
+
+  test("falls back to a worktree-prefixed path for a subdirectory Location", () => {
+    expect(diffPatch([{ file: "packages/tui/src/a.ts", patch: "@@ suffix @@" }], change)).toBe("@@ suffix @@")
+  })
+
+  test("is undefined when no diff matches the change", () => {
+    expect(diffPatch([{ file: "src/other.ts", patch: "@@ x @@" }], change)).toBeUndefined()
+    expect(diffPatch([], change)).toBeUndefined()
   })
 })
 

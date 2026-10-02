@@ -1,6 +1,8 @@
 import { Plugin } from "@opencode/plugin/tui"
 import type { PanelInput } from "@opencode/plugin/tui/context"
+import type { LocationRef } from "@opencode/client"
 import { isInvalidRequestError } from "@opencode/client/promise"
+import type { ScrollBoxRenderable } from "@opentui/core"
 import { createEffect, createMemo, createResource, Index, onCleanup, Show } from "solid-js"
 import { useThemes } from "../../context/theme"
 import { PatchDiff } from "../../component/patch-diff"
@@ -9,9 +11,9 @@ import { errorMessage } from "../../util/error"
 import { toolDisplayMetadata } from "../../util/tool-display"
 import {
   deriveHistory,
+  diffPatch,
   legacyPatch,
   livePatch,
-  matchesFile,
   mergeHistory,
   type SessionChange,
   type SessionPrompt,
@@ -19,6 +21,10 @@ import {
 } from "./changes-model"
 
 type Selection = { sessionID: string; changeID: string }
+
+// The server treats an omitted `context` as the whole file. Ask for the change plus a few
+// surrounding lines so selecting a change in a large file renders hunks, not the entire file.
+const DIFF_CONTEXT_LINES = 3
 
 // Persisted projection: the client only keeps a window of recent messages, so the
 // tree is served from this accumulated (disk-backed) history instead.
@@ -213,9 +219,40 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
   )
 }
 
+/** Exact per-step diff from the step's own start/end snapshots. A location-spanning step is a
+ * rejection, not an error worth toasting, so it degrades to the next source. */
+async function stepDiff(context: Plugin.Context, sessionID: string, change: SessionChange) {
+  try {
+    const diffs = await context.client.session.step.diff({
+      sessionID,
+      messageID: change.messageID,
+      context: DIFF_CONTEXT_LINES,
+    })
+    return diffPatch(diffs, change)
+  } catch (error) {
+    if (isInvalidRequestError(error)) return undefined
+    context.ui.toast.show({ message: errorMessage(error), variant: "error" })
+    return undefined
+  }
+}
+
+/** Final git fallback: HEAD vs the working copy, so a diff still resolves for pre-snapshot or
+ * evicted steps. Returns nothing once the change is committed. */
+async function workingDiff(context: Plugin.Context, location: LocationRef, change: SessionChange) {
+  try {
+    const result = await context.client.vcs.diff({ location, mode: "working", context: DIFF_CONTEXT_LINES })
+    return diffPatch(result.data ?? [], change)
+  } catch (error) {
+    context.ui.toast.show({ message: errorMessage(error), variant: "error" })
+    return undefined
+  }
+}
+
 export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput }) {
   const theme = () => props.context.theme
   const { currentSyntax } = useThemes()
+  let diffScroll: ScrollBoxRenderable | undefined
+  onCleanup(() => (diffScroll = undefined))
   const history = props.context.storage.store<HistoryStore>("history", HistoryStoreOptions)
   const memory = props.context.storage.memory<ChangesMemory>("state", MemoryOptions)[0]
   const current = createMemo<{ step: SessionStep; change: SessionChange } | undefined>(() => {
@@ -240,26 +277,19 @@ export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput
     async (id) => {
       const change = selected()
       if (!change || change.id !== id) return undefined
+      // Every source below is a way to reach the same diff. Prefer the most precise one that is
+      // available, and never leave the panel empty when any source can answer.
       const legacy = legacyPatch(change)
       if (legacy) return legacy
-      const diffsAvailable = props.context.data.location.vcs.info(sessionLocation())?.provider === "git"
-      if (!diffsAvailable) return undefined
       const live = livePatch(props.context.data.session.message.get(props.input.sessionID, change.messageID), change)
       if (live) return live
-      try {
-        const diffs = await props.context.client.session.step.diff({
-          sessionID: props.input.sessionID,
-          messageID: change.messageID,
-        })
-        const match =
-          diffs.find((diff) => diff.file === change.file) ?? diffs.find((diff) => matchesFile(diff.file, change.file))
-        return match?.patch
-      } catch (error) {
-        // A step spanning a location change is a rejection, not a failure we can re-render.
-        if (isInvalidRequestError(error)) return undefined
-        props.context.ui.toast.show({ message: errorMessage(error), variant: "error" })
-        return undefined
-      }
+      const location = sessionLocation()
+      if (props.context.data.location.vcs.info(location)?.provider !== "git") return undefined
+      // Exact per-step snapshot diff, then the working-tree diff as the final git fallback.
+      return (
+        (await stepDiff(props.context, props.input.sessionID, change)) ??
+        (await workingDiff(props.context, location, change))
+      )
     },
   )
 
@@ -359,7 +389,12 @@ export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput
               </text>
             </box>
             <box flexGrow={1} flexBasis={0} minHeight={0}>
-              <scrollbox flexGrow={1} minHeight={0} horizontalScrollbarOptions={{ visible: false }}>
+              <scrollbox
+                ref={(element: ScrollBoxRenderable) => (diffScroll = element)}
+                flexGrow={1}
+                minHeight={0}
+                horizontalScrollbarOptions={{ visible: false }}
+              >
                 <Show
                   when={!patch.loading && patch()}
                   fallback={
@@ -371,6 +406,7 @@ export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput
                   {(text) => (
                     <PatchDiff
                       diff={text()}
+                      scroll={() => diffScroll}
                       hunkFg={theme().diff.text.hunkHeader}
                       view="unified"
                       filetype={filetype(value().change.file)}

@@ -60,12 +60,15 @@ function splitRows(hunk: string) {
 
   while (index < lines.length) {
     const prefix = lines[index][0]
-    if (prefix === " " || !prefix) {
-      rows++
+    if (prefix === "\\") {
       index++
       continue
     }
-    if (prefix === "\\") {
+    // Anything that is not an addition or deletion is context. This also absorbs a foreign
+    // line (for example a `diff --git` header when a multi-file patch reaches a single
+    // hunk slice), which guarantees the loop advances instead of spinning forever.
+    if (prefix !== "+" && prefix !== "-") {
+      rows++
       index++
       continue
     }

@@ -111,6 +111,13 @@ export function livePatch(message: SessionMessageInfo | undefined, change: Sessi
   return stringField(file, "patch")
 }
 
+/** The `patch` for `change.file` in a `FileDiff.Info` list, matching Location- or worktree-relative paths. */
+export function diffPatch(diffs: readonly { file: string; patch?: string }[], change: SessionChange) {
+  const match =
+    diffs.find((diff) => diff.file === change.file) ?? diffs.find((diff) => matchesFile(diff.file, change.file))
+  return match?.patch
+}
+
 /** `metadata.files` is the canonical `FileDiff.Info` list emitted by edit/patch. */
 function parsePatchFiles(value: unknown): PatchFile[] {
   if (!Array.isArray(value)) return []

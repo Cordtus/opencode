@@ -367,7 +367,9 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
                         focusRightPane()
                         return
                       }
-                      setActivePane("session")
+                      // Closing the panel unmounts the node that held renderer focus. Hand focus
+                      // back to the session like focusSession does, or nothing accepts input.
+                      focusSession()
                     }}
                   />
                 )}
