@@ -3444,35 +3444,32 @@ function Question(props: ToolProps) {
   const theme = useTheme()
   const questions = createMemo(() => parseQuestions(props.input.questions))
   const answers = createMemo(() => parseQuestionAnswers(props.metadata.answers))
-  const count = createMemo(() => questions().length)
+  const pending = createMemo(() => props.part.state.status === "streaming" || props.part.state.status === "running")
 
   function format(answer?: ReadonlyArray<string>) {
     if (!answer?.length) return "(no answer)"
     return answer.join(", ")
   }
 
+  // Always render the questions themselves. The interactive form is only a pinned prompt while it
+  // is open, so a dismissed or interrupted question must still leave the questions readable in the
+  // transcript rather than a bare "Asked N questions" count.
   return (
-    <Switch>
-      <Match when={answers()}>
-        <BlockTool title="# Questions" part={props.part}>
-          <box gap={1}>
-            <For each={questions()}>
-              {(q, i) => (
-                <box flexDirection="column">
-                  <text fg={theme.text.muted}>{q.question}</text>
-                  <text fg={theme.text.base}>{format(answers()?.[i()])}</text>
-                </box>
-              )}
-            </For>
-          </box>
-        </BlockTool>
-      </Match>
-      <Match when={true}>
-        <InlineTool icon="→" pending="Asking questions…" complete={count()} part={props.part}>
-          Asked {count()} question{count() !== 1 ? "s" : ""}
-        </InlineTool>
-      </Match>
-    </Switch>
+    <BlockTool title="# Questions" part={props.part} spinner={pending()}>
+      <box gap={1}>
+        <For each={questions()}>
+          {(q, i) => (
+            <box flexDirection="column">
+              <text fg={theme.text.muted}>{q.question}</text>
+              <Show when={answers()}>{(value) => <text fg={theme.text.base}>{format(value()[i()])}</text>}</Show>
+            </box>
+          )}
+        </For>
+        <Show when={!answers() && !pending()}>
+          <text fg={theme.text.feedback.warning.base}>No answer recorded.</text>
+        </Show>
+      </box>
+    </BlockTool>
   )
 }
 
