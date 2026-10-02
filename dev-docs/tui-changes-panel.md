@@ -46,10 +46,15 @@ commit that bundles several steps does not blur them. A step still running compa
 predating snapshots yields no diffs. A change's `file` is Location-relative while a snapshot diff path is worktree-relative,
 so the panel matches exact first and falls back to a path suffix for subdirectory Locations. Diffs are resolved in order
 without duplication: a legacy stored `patch` (`/redo` restores one), then the live tool result's `metadata.files` when the
-step is still in the client window, then `session.step.diff` for an evicted step. A step whose start-to-end range crosses a
-location switch is rejected (the snapshots live in different repositories) and shows no diff. `mergeHistory` preserves a
-legacy `patch` on the persisted change, keyed by change id instead of array position, so old sessions keep their diffs and
-the store still ages out of the duplicated patch data as entries are replaced — no migration needed.
+step is still in the client window, then `session.step.diff` for an evicted step, then the working-tree diff as a final git
+fallback. A step whose start-to-end range crosses a location switch is rejected (the snapshots live in different
+repositories) and shows no diff. `mergeHistory` preserves a legacy `patch` on the persisted change, keyed by change id
+instead of array position, so old sessions keep their diffs and the store still ages out of the duplicated patch data as
+entries are replaced — no migration needed.
+
+Every request asks for a bounded `context` (three unchanged lines around each hunk). The server treats an omitted `context`
+as the whole file, so an unbounded request made selecting a change in a large file render the entire file. The panel's
+`PatchDiff` is also given the diff `scrollbox`, which enables its large-added-file virtualization.
 
 ### Without git
 
@@ -74,7 +79,8 @@ because the projection is client-side.
   - `append` on `session.panel` → `ChangeDetail` (diff top half, reasoning bottom half, both scrollable; Undo).
 - Registered in `plugin/builtins.ts`; keybind default in `config/keybind.ts`.
 - `ChangeDetail`'s on-demand diff resolution is covered by `test/feature-plugins/changes-detail.test.tsx`
-  (the step endpoint path and the legacy-patch short circuit); the tree and model have their own tests.
+  (the step endpoint path, the bounded-context request, the working-tree fallback, and the legacy-patch short circuit);
+  the tree and model have their own tests. `test/util/added-patch.test.ts` covers `splitPatchHunks` on a multi-file patch.
 
 Selection and expansion live in the plugin memory store (`context.storage.memory("state")`), shared between the sidebar and
 the panel and surviving hot reloads. Prompts default expanded, steps default collapsed.
@@ -125,3 +131,8 @@ See `dev-docs/local-development.md` (`opencode-local`).
 - 2026-09-30: Stopped persisting patches. Diffs load on selection from the new step-scoped snapshot endpoint
   (`session.step.diff`), so history stores only session context and never duplicates snapshot/git data. Exact per-step
   attribution because each step has its own start/end snapshot; project commit boundaries are irrelevant.
+- 2026-10-01: Closing the detail panel with `✕` now hands renderer focus back to the prompt (`focusSession`), instead of
+  leaving it on the unmounted panel node where the TUI accepted no input. Diff requests ask for a bounded context (three
+  lines) and the panel's `PatchDiff` receives its scrollbox, so a change in a large file renders hunks and large added
+  files virtualize rather than rendering the whole file. `splitPatchHunks` no longer stalls when a foreign line (a
+  multi-file patch's `diff --git` header) reaches a single hunk slice.

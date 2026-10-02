@@ -6,6 +6,7 @@ Project-level knowledge for this worktree.
   undo constraint.
 - [Local development](./local-development.md) — `opencode-local`, the V2 dev entry, and the free-tier Console limitation.
 - [Fork workflow](./fork-workflow.md) — mirror `v2` vs `integration`, and how to sync / start a feature.
+- [Work in progress](./work-in-progress.md) — current scope, in-flight edits, and remaining tasks for the changes panel.
 
 Dated logs normally live under `dev-docs/logs/`, which this repo ignores via its generic `logs/` rule; history is kept in a
 "History" section of the relevant area doc instead.
