@@ -243,6 +243,11 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
   )
 }
 
+/** A resolved diff, or the reason there is none: `untracked` means every tracked-tree source
+ * answered without the file, so it is not tracked at all (gitignored, outside the worktree, or
+ * over the snapshot's untracked size limit) or the change is already gone. */
+type DiffResult = { readonly patch?: string; readonly untracked?: boolean }
+
 /** Exact per-step diff from the step's own start/end snapshots. A location-spanning step is a
  * rejection, not an error worth toasting, so it degrades to the next source. */
 async function stepDiff(context: Plugin.Context, sessionID: string, change: SessionChange) {
@@ -260,14 +265,21 @@ async function stepDiff(context: Plugin.Context, sessionID: string, change: Sess
   }
 }
 
-/** Final git fallback: HEAD vs the working copy, so a diff still resolves for pre-snapshot or
- * evicted steps. Returns nothing once the change is committed. */
-async function workingDiff(context: Plugin.Context, location: LocationRef, change: SessionChange) {
+/** Git diff of the file: HEAD vs the working copy (`working`), or the branch base vs the working
+ * copy (`branch`). The branch rung is the least precise — it also sees earlier commits — but it is
+ * the only source for a committed change in a step with no snapshots. */
+async function gitDiff(
+  context: Plugin.Context,
+  location: LocationRef,
+  change: SessionChange,
+  mode: "working" | "branch",
+) {
   try {
-    const result = await context.client.vcs.diff({ location, mode: "working", context: DIFF_CONTEXT_LINES })
+    const result = await context.client.vcs.diff({ location, mode, context: DIFF_CONTEXT_LINES })
     return diffPatch(result.data ?? [], change)
   } catch (error) {
-    context.ui.toast.show({ message: errorMessage(error), variant: "error" })
+    // The branch rung is a last resort; a repository without a default branch should not toast.
+    if (mode === "working") context.ui.toast.show({ message: errorMessage(error), variant: "error" })
     return undefined
   }
 }
@@ -298,22 +310,26 @@ export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput
     props.context.data.session.get(props.input.sessionID)?.location ?? props.context.data.location.default()
   const [patch] = createResource(
     () => selected()?.id,
-    async (id) => {
+    async (id): Promise<DiffResult | undefined> => {
       const change = selected()
       if (!change || change.id !== id) return undefined
       // Every source below is a way to reach the same diff. Prefer the most precise one that is
       // available, and never leave the panel empty when any source can answer.
       const legacy = legacyPatch(change)
-      if (legacy) return legacy
+      if (legacy) return { patch: legacy }
       const live = livePatch(props.context.data.session.message.get(props.input.sessionID, change.messageID), change)
-      if (live) return live
+      if (live) return { patch: live }
       const location = sessionLocation()
-      if (props.context.data.location.vcs.info(location)?.provider !== "git") return undefined
-      // Exact per-step snapshot diff, then the working-tree diff as the final git fallback.
-      return (
-        (await stepDiff(props.context, props.input.sessionID, change)) ??
-        (await workingDiff(props.context, location, change))
-      )
+      if (props.context.data.location.vcs.info(location)?.provider !== "git") return {}
+      // Exact per-step snapshot diff, then the working tree, then the branch base.
+      const step = await stepDiff(props.context, props.input.sessionID, change)
+      if (step) return { patch: step }
+      const working = await gitDiff(props.context, location, change, "working")
+      if (working) return { patch: working }
+      const branch = await gitDiff(props.context, location, change, "branch")
+      if (branch) return { patch: branch }
+      // Every tracked-tree source answered without this file.
+      return { untracked: true }
     },
   )
 
@@ -420,14 +436,16 @@ export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput
                 horizontalScrollbarOptions={{ visible: false }}
               >
                 <Show
-                  when={!patch.loading && patch()}
+                  when={!patch.loading && patch()?.patch}
                   fallback={
                     <text fg={theme().text.muted}>
                       {patch.loading
                         ? "Loading diff…"
                         : value().change.kind === "plan"
                           ? "No diff expected (plan document)."
-                          : "No diff available for this change."}
+                          : patch()?.untracked
+                            ? "No diff expected (the file is not in a tracked tree)."
+                            : "No diff available for this change."}
                     </text>
                   }
                 >

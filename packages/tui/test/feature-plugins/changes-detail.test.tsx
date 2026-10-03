@@ -223,7 +223,42 @@ test("says a plan document has no expected diff instead of a bare no-diff messag
   })
   const app = await render(ctx)
   try {
-    await app.waitForFrame((frame) => frame.includes("No diff expected"))
+    await app.waitForFrame((frame) => frame.includes("No diff expected") && frame.includes("plan document"))
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("falls back to the branch diff when the working tree is clean", async () => {
+  const modes: string[] = []
+  const ctx = context(
+    async () => [],
+    undefined,
+    async (input) => {
+      modes.push(input.mode)
+      return input.mode === "branch"
+        ? { data: [{ file: "src/parser.ts", patch: "@@ -1 +1 @@\n-committed\n+branch change" }] }
+        : { data: [] }
+    },
+  )
+  const app = await render(ctx)
+  try {
+    await app.waitForFrame((frame) => frame.includes("branch change"))
+    expect(modes).toEqual(["working", "branch"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("marks a change that is in no tracked tree as having no expected diff", async () => {
+  const ctx = context(
+    async () => [],
+    undefined,
+    async () => ({ data: [] }),
+  )
+  const app = await render(ctx)
+  try {
+    await app.waitForFrame((frame) => frame.includes("not in a tracked tree"))
   } finally {
     app.renderer.destroy()
   }

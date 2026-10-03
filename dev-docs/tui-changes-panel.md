@@ -46,11 +46,11 @@ commit that bundles several steps does not blur them. A step still running compa
 predating snapshots yields no diffs. A change's `file` is Location-relative while a snapshot diff path is worktree-relative,
 so the panel matches exact first and falls back to a path suffix for subdirectory Locations. Diffs are resolved in order
 without duplication: a legacy stored `patch` (`/redo` restores one), then the live tool result's `metadata.files` when the
-step is still in the client window, then `session.step.diff` for an evicted step, then the working-tree diff as a final git
-fallback. A step whose start-to-end range crosses a location switch is rejected (the snapshots live in different
-repositories) and shows no diff. `mergeHistory` preserves a legacy `patch` on the persisted change, keyed by change id
-instead of array position, so old sessions keep their diffs and the store still ages out of the duplicated patch data as
-entries are replaced — no migration needed.
+step is still in the client window, then `session.step.diff` for an evicted step, then the working-tree diff, then the
+branch-base diff as the last resort. A step whose start-to-end range crosses a location switch is rejected (the snapshots
+live in different repositories) and shows no diff. `mergeHistory` preserves a legacy `patch` on the persisted change, keyed
+by change id instead of array position, so old sessions keep their diffs and the store still ages out of the duplicated
+patch data as entries are replaced — no migration needed.
 
 Every request asks for a bounded `context` (three unchanged lines around each hunk). The server treats an omitted `context`
 as the whole file, so an unbounded request made selecting a change in a large file render the entire file. The panel's
@@ -75,26 +75,28 @@ plainly, without claiming a diff should have been there.
 
 ### Why a code step's diff may not resolve
 
-The ladder tries, in order: legacy patch, live tool patch, `session.step.diff`, then the working-tree diff. A code step
-resolves unless every source is empty. The known reasons:
+The ladder tries, in order: legacy patch, live tool patch, `session.step.diff`, the working-tree diff, then the branch-base
+diff. A code step resolves unless every source is empty. The known reasons:
 
 - **Not a git Location, or snapshots disabled** — no snapshot tree exists, so only a live or legacy patch can answer, and
-  the working-tree rung is skipped entirely.
+  the git rungs are skipped entirely. The panel reports "No diff available".
 - **No recorded snapshot range** — a session predating snapshots, a step with no end snapshot that is not running, or a
-  best-effort capture that returned `undefined`.
+  best-effort capture that returned `undefined`. The working-tree and branch rungs still answer an uncommitted or committed
+  change.
 - **Location switch within the step** — rejected; the two snapshots live in different repositories.
-- **The file is gitignored** — the snapshot tree excludes ignored paths, and both the snapshot and working-tree diffs drop
-  them, so no diff can exist. This is intentional: ignored files are not tracked.
-- **An untracked file larger than 2 MB** — not captured into the snapshot tree.
-- **The change is committed (or reverted) and the step has no snapshots** — the working tree is clean, so the final rung is
-  empty.
+- **The file is gitignored, outside the worktree, or an untracked file larger than 2 MB** — the snapshot tree excludes it,
+  and the working-tree and branch diffs drop it too. When every tracked-tree source answers without the file, the panel says
+  "No diff expected (the file is not in a tracked tree)" rather than implying a diff is missing.
+- **The change is committed on the repository's default branch** — the branch rung compares against that same base, so it
+  is empty; only a step snapshot can answer. This is the one committed case with no source.
 - **Path mismatch** — a Location-relative `change.file` versus a worktree-relative diff path. `matchesFile` handles exact
   paths, a subdirectory Location's prefix, and an absolute `write` input whose resolved diff path is a suffix.
 - **Transport/server errors** — a missing location directory (`LocationNotFoundError`), a snapshot error, or a failed
   request; the panel toasts and reports no diff.
 
-The first two and the last two are recoverable in principle; the gitignored and oversized cases are not, because the file is
-not in the tracked tree at all.
+The branch rung is the least precise — it also sees earlier commits on the branch — but it is the only source for a
+committed change in a step with no snapshots. The gitignored and oversized cases cannot be diffed at all, because the file
+is not in the tracked tree.
 
 ## Components
 
@@ -170,3 +172,7 @@ See `dev-docs/local-development.md` (`opencode-local`).
 - 2026-10-03: Planning steps are visually separated from code steps. `isPlanStep` marks a step whose every change is a
   plan-document edit; the tree dims its label and shows a `plan` marker, and the detail panel reports "No diff expected"
   rather than a bare no-diff message.
+- 2026-10-03: Added a branch-base diff as the last resolution rung, so a committed change in a step with no snapshots still
+  resolves. When every tracked-tree source answers without the file (gitignored, outside the worktree, or over the snapshot
+  size limit), the panel says "No diff expected" instead of implying a diff is missing. `matchesFile` also matches a
+  worktree-relative diff path against an absolute `write` input.
