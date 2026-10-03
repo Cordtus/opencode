@@ -112,6 +112,14 @@ describe("changes-model.matchesFile", () => {
     // A suffix match must respect the path segment boundary.
     expect(matchesFile("src/notparser.ts", "parser.ts")).toBe(false)
   })
+
+  test("matches a worktree-relative diff against an absolute change path", () => {
+    expect(matchesFile("packages/tui/src/parser.ts", "/repo/packages/tui/src/parser.ts")).toBe(true)
+    expect(matchesFile("packages/tui/src/other.ts", "/repo/packages/tui/src/parser.ts")).toBe(false)
+    // The reverse suffix is only used for absolute change paths, so a longer relative change
+    // path never matches a shorter diff path.
+    expect(matchesFile("src/parser.ts", "packages/tui/src/parser.ts")).toBe(false)
+  })
 })
 
 describe("changes-model.diffPatch", () => {

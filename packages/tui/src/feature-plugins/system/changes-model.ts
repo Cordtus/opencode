@@ -106,13 +106,16 @@ function isPlanFile(file: string) {
 }
 
 /**
- * Match a snapshot diff path (worktree-relative) to a change's `file` (Location-relative).
- * A subdirectory Location prefixes the diff path, so exact match wins and a path suffix is
- * the fallback.
+ * Match a snapshot or VCS diff path (worktree-relative) to a change's `file` (Location-relative).
+ * A subdirectory Location prefixes the diff path, so exact match wins and a path suffix is the
+ * fallback. A `write` whose model input was an absolute path keeps that absolute path on the
+ * change, so there the diff path is a suffix of the change instead.
  */
 export function matchesFile(diffFile: string, changeFile: string) {
-  const target = changeFile.replaceAll("\\", "/").replace(/^\.\//, "")
-  return diffFile === target || diffFile.endsWith(`/${target}`)
+  const diff = diffFile.replaceAll("\\", "/").replace(/^\.\//, "")
+  const change = changeFile.replaceAll("\\", "/").replace(/^\.\//, "")
+  if (diff === change || diff.endsWith(`/${change}`)) return true
+  return change.startsWith("/") && change.endsWith(`/${diff}`)
 }
 
 /**

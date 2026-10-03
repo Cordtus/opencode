@@ -73,6 +73,29 @@ A step whose changes are _all_ plan edits is a planning step: `isPlanStep` marks
 diff includes them). A step that changes code is unmarked and expects a diff; when one cannot be resolved the panel says so
 plainly, without claiming a diff should have been there.
 
+### Why a code step's diff may not resolve
+
+The ladder tries, in order: legacy patch, live tool patch, `session.step.diff`, then the working-tree diff. A code step
+resolves unless every source is empty. The known reasons:
+
+- **Not a git Location, or snapshots disabled** — no snapshot tree exists, so only a live or legacy patch can answer, and
+  the working-tree rung is skipped entirely.
+- **No recorded snapshot range** — a session predating snapshots, a step with no end snapshot that is not running, or a
+  best-effort capture that returned `undefined`.
+- **Location switch within the step** — rejected; the two snapshots live in different repositories.
+- **The file is gitignored** — the snapshot tree excludes ignored paths, and both the snapshot and working-tree diffs drop
+  them, so no diff can exist. This is intentional: ignored files are not tracked.
+- **An untracked file larger than 2 MB** — not captured into the snapshot tree.
+- **The change is committed (or reverted) and the step has no snapshots** — the working tree is clean, so the final rung is
+  empty.
+- **Path mismatch** — a Location-relative `change.file` versus a worktree-relative diff path. `matchesFile` handles exact
+  paths, a subdirectory Location's prefix, and an absolute `write` input whose resolved diff path is a suffix.
+- **Transport/server errors** — a missing location directory (`LocationNotFoundError`), a snapshot error, or a failed
+  request; the panel toasts and reports no diff.
+
+The first two and the last two are recoverable in principle; the gitignored and oversized cases are not, because the file is
+not in the tracked tree at all.
+
 ## Components
 
 - `feature-plugins/system/changes-model.ts` — pure `deriveHistory(messages)` and `mergeHistory(previous, next)`; change
