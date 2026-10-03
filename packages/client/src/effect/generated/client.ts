@@ -252,6 +252,8 @@ import type {
   VcsBaseOutput,
   VcsStatusInput,
   VcsStatusOutput,
+  VcsIgnoredInput,
+  VcsIgnoredOutput,
   VcsBranchListInput,
   VcsBranchListOutput,
   VcsDiffInput,
@@ -1519,6 +1521,13 @@ const EndpointVcsStatus = (raw: RawClient["server.vcs"]) => (input?: VcsStatusIn
     raw["vcs.status"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
+const EndpointVcsIgnored = (raw: RawClient["server.vcs"]) => (input: VcsIgnoredInput) =>
+  preserveEffect<VcsIgnoredOutput>()(
+    raw["vcs.ignored"]({ query: { location: input["location"] }, payload: { paths: input["paths"] } }).pipe(
+      Effect.mapError(mapClientError),
+    ),
+  )
+
 const EndpointVcsBranchList = (raw: RawClient["server.vcs"]) => (input?: VcsBranchListInput) =>
   preserveEffect<VcsBranchListOutput>()(
     raw["vcs.branch.list"]({
@@ -1538,6 +1547,7 @@ const adaptGroupVcs = (raw: RawClient["server.vcs"]) => ({
   get: EndpointVcsGet(raw),
   base: EndpointVcsBase(raw),
   status: EndpointVcsStatus(raw),
+  ignored: EndpointVcsIgnored(raw),
   branch: { list: EndpointVcsBranchList(raw) },
   diff: EndpointVcsDiff(raw),
 })

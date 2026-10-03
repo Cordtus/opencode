@@ -73,6 +73,11 @@ A step whose changes are _all_ plan edits is a planning step: `isPlanStep` marks
 diff includes them). A step that changes code is unmarked and expects a diff; when one cannot be resolved the panel says so
 plainly, without claiming a diff should have been there.
 
+Ignored files may still matter to a task (dev docs, context/prompt files, build outputs), so the tree also marks each
+change the provider ignores. `TaskTree` asks `client.vcs.ignored` — a POST carrying the session's change paths, backed by
+`git check-ignore` through the VCS adapter — once per session, and dims those rows and adds an `untracked` marker. Unlike
+the plan tag this needs the provider, so it is a separate, best-effort signal that simply omits the marker when unavailable.
+
 ### Why a code step's diff may not resolve
 
 The ladder tries, in order: legacy patch, live tool patch, `session.step.diff`, the working-tree diff, then the branch-base
@@ -176,3 +181,6 @@ See `dev-docs/local-development.md` (`opencode-local`).
   resolves. When every tracked-tree source answers without the file (gitignored, outside the worktree, or over the snapshot
   size limit), the panel says "No diff expected" instead of implying a diff is missing. `matchesFile` also matches a
   worktree-relative diff path against an absolute `write` input.
+- 2026-10-03: Added `vcs.ignored` (POST paths → the ignored subset, backed by `git check-ignore`) through the VCS provider
+  interface, core service, protocol, generated client, and plugin adapters. The changes tree marks ignored changes with an
+  `untracked` label and dims them, since ignored files can still be relevant to the task.

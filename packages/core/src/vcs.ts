@@ -2,7 +2,7 @@ export * as Vcs from "./vcs.js"
 
 import path from "path"
 import { Cause, Context, Effect, FiberSet, Layer, Schema, Semaphore, Stream } from "effect"
-import type { VcsDefinition, VcsEditor } from "@opencode/plugin/effect/vcs"
+import type { VcsDefinition, VcsEditor, VcsIgnoredInput } from "@opencode/plugin/effect/vcs"
 import { FileDiff } from "@opencode/schema/file-diff"
 import { FileSystem } from "@opencode/schema/filesystem"
 import { Base, BranchList, FileStatus, Info, Mode } from "@opencode/schema/vcs"
@@ -40,6 +40,8 @@ export interface Adapter {
   readonly base?: () => Effect.Effect<Base | null, DiffError>
   readonly branches: (options?: BranchOptions) => Effect.Effect<BranchList>
   readonly status: () => Effect.Effect<FileStatus[]>
+  /** The subset of `paths` (Location-relative) the provider ignores. */
+  readonly ignored?: (paths: readonly string[]) => Effect.Effect<readonly string[]>
   readonly diff: (mode: Mode, options?: DiffOptions) => Effect.Effect<FileDiff.Info[], DiffError>
 }
 
@@ -224,6 +226,16 @@ const layer = Layer.effect(
             [],
           )
         return []
+      }),
+      ignored: Effect.fn("Vcs.ignored")(function* (paths: readonly string[]) {
+        const provider = selected()
+        if (!provider?.ignored) return []
+        return yield* protect(
+          provider,
+          "ignored",
+          provider.ignored({ ...scope, paths } satisfies VcsIgnoredInput).pipe(Effect.map((rows) => Array.from(rows))),
+          [],
+        )
       }),
       diff: Effect.fn("Vcs.diff")(function* (mode: Mode, options?: DiffOptions) {
         const provider = selected()

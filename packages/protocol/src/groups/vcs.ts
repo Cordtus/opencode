@@ -93,6 +93,22 @@ export const VcsGroup = HttpApiGroup.make("server.vcs")
       ),
   )
   .add(
+    HttpApiEndpoint.post("vcs.ignored", "/api/vcs/ignored", {
+      query: LocationQuery,
+      payload: Schema.Struct({ paths: Schema.Array(Schema.String) }),
+      success: Location.response(Schema.Array(Schema.String)),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "vcs.ignored",
+          summary: "VCS ignored paths",
+          description:
+            "Return the subset of the requested Location-relative paths that the provider ignores. Used to mark changes that can never have a tracked diff.",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.get("vcs.branch.list", "/api/vcs/branch", {
       query: BranchesQuery,
       success: Location.response(Vcs.BranchList),

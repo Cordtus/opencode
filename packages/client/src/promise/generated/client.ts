@@ -250,6 +250,8 @@ import type {
   VcsBaseOutput,
   VcsStatusInput,
   VcsStatusOutput,
+  VcsIgnoredInput,
+  VcsIgnoredOutput,
   VcsBranchListInput,
   VcsBranchListOutput,
   VcsDiffInput,
@@ -2100,6 +2102,19 @@ export function make(options: ClientOptions) {
             method: "GET",
             path: `/api/vcs/status`,
             query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 404],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      ignored: (input: VcsIgnoredInput, requestOptions?: RequestOptions) =>
+        request<VcsIgnoredOutput>(
+          {
+            method: "POST",
+            path: `/api/vcs/ignored`,
+            query: { location: input["location"] },
+            body: { paths: input["paths"] },
             successStatus: 200,
             declaredStatuses: [400, 401, 404],
             empty: false,

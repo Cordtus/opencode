@@ -126,6 +126,23 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
   )
   const memory = props.context.storage.memory<ChangesMemory>("state", MemoryOptions)[0]
   const update = props.context.storage.memory<ChangesMemory>("state", MemoryOptions)[1]
+  // Ignored paths never enter a tracked tree, so their changes can never have a diff. Ask the
+  // provider once per session so the tree can separate "no tracked diff" from "diff not loaded".
+  const [ignoredPaths] = createResource(
+    () => props.context.data.session.get(props.sessionID)?.location ?? props.context.data.location.default(),
+    async (location) => {
+      const paths = (history[0].sessions[props.sessionID] ?? []).flatMap((prompt) =>
+        prompt.steps.flatMap((step) => step.changes.map((change) => change.file)),
+      )
+      if (!paths.length) return new Set<string>()
+      try {
+        return new Set((await props.context.client.vcs.ignored({ location, paths })).data)
+      } catch {
+        return new Set<string>()
+      }
+    },
+  )
+  const isIgnored = (file: string) => ignoredPaths()?.has(file) ?? false
 
   const toggle = (id: string, fallback: boolean) =>
     update((draft) => {
@@ -210,10 +227,21 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
                                           plan
                                         </text>
                                       </Show>
+                                      <Show when={isIgnored(change().file)}>
+                                        <text flexShrink={0} fg={theme().text.muted}>
+                                          untracked
+                                        </text>
+                                      </Show>
                                       <text
                                         flexGrow={1}
                                         wrapMode="word"
-                                        fg={selected(change().id) ? theme().text.base : levelColor(theme(), 2)}
+                                        fg={
+                                          selected(change().id)
+                                            ? theme().text.base
+                                            : isIgnored(change().file)
+                                              ? theme().text.muted
+                                              : levelColor(theme(), 2)
+                                        }
                                       >
                                         {change().file}
                                       </text>

@@ -2301,6 +2301,13 @@ export type VcsStatusInput = { readonly location?: { readonly directory?: string
 export type VcsStatusOutput = { readonly location: Location.PublicRef; readonly data: ReadonlyArray<Vcs.FileStatus> }
 export type VcsStatusOperation<E = never> = (input?: VcsStatusInput) => Effect.Effect<VcsStatusOutput, E>
 
+export type VcsIgnoredInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly paths: ReadonlyArray<string>
+}
+export type VcsIgnoredOutput = { readonly location: Location.PublicRef; readonly data: ReadonlyArray<string> }
+export type VcsIgnoredOperation<E = never> = (input: VcsIgnoredInput) => Effect.Effect<VcsIgnoredOutput, E>
+
 export type VcsBranchListInput = {
   readonly location?: { readonly directory?: string | undefined } | undefined
   readonly search?: string | undefined
@@ -2323,6 +2330,7 @@ export interface VcsApi<E = never> {
   readonly get: VcsGetOperation<E>
   readonly base: VcsBaseOperation<E>
   readonly status: VcsStatusOperation<E>
+  readonly ignored: VcsIgnoredOperation<E>
   readonly branch: { readonly list: VcsBranchListOperation<E> }
   readonly diff: VcsDiffOperation<E>
 }

@@ -472,6 +472,10 @@ export const make = Effect.fn("PluginHost.make")(function* (
         list: (input) => response(vcs.branches({ search: input?.search, limit: input?.limit })),
       },
       status: () => response(vcs.status()),
+      ignored: (input) => {
+        const ignored = vcs.ignored
+        return response(ignored && input.paths?.length ? ignored(input.paths) : Effect.succeed([]))
+      },
       diff: (input) => response(vcs.diff(input.mode, { context: input.context, base: input.base })),
       transform: vcs.transform,
       reload: vcs.reload,

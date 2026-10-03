@@ -48,6 +48,7 @@ test.skipIf(process.platform === "win32")("closing the changes panel returns foc
     if (url.pathname === `/api/session/${session.id}/message`) return json({ data: messages.toReversed(), cursor: {} })
     if (url.pathname === `/api/session/${session.id}/inbox`) return json({ data: [] })
     if (url.pathname === `/api/session/${session.id}/permission`) return json({ data: [] })
+    if (url.pathname === "/api/vcs/ignored") return json({ data: [] })
     if (url.pathname === `/api/session/${session.id}/step/m1/diff`)
       return json({
         data: [

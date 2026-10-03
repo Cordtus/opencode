@@ -6556,6 +6556,13 @@ export type VcsStatusInput = {
 
 export type VcsStatusOutput = { location: LocationPublicRef; data: Array<VcsFileStatus> }
 
+export type VcsIgnoredInput = {
+  readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
+  readonly paths: { readonly paths: ReadonlyArray<string> }["paths"]
+}
+
+export type VcsIgnoredOutput = { location: LocationPublicRef; data: Array<string> }
+
 export type VcsBranchListInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined } | undefined

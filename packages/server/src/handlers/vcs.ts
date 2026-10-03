@@ -80,6 +80,15 @@ export const VcsHandler = HttpApiBuilder.group(Api, "server.vcs", (handlers) =>
           }),
         ),
       )
+      .handle("vcs.ignored", (ctx) =>
+        response(
+          Effect.gen(function* () {
+            const vcs = yield* Vcs.Service
+            const ignored = vcs.ignored
+            return ignored ? yield* ignored(ctx.payload.paths) : []
+          }),
+        ),
+      )
       .handle("vcs.branch.list", (ctx) =>
         response(
           Effect.gen(function* () {

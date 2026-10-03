@@ -39,7 +39,11 @@ const messages = [
   },
 ] as unknown as SessionMessageInfo[]
 
-function context(expanded: Record<string, boolean> = {}, source: SessionMessageInfo[] = messages) {
+function context(
+  expanded: Record<string, boolean> = {},
+  source: SessionMessageInfo[] = messages,
+  ignored: string[] = [],
+) {
   const color = RGBA.fromInts(200, 200, 200)
   const feedback = { base: color, muted: color }
   // Seed the accumulated history the tree renders from.
@@ -58,7 +62,11 @@ function context(expanded: Record<string, boolean> = {}, source: SessionMessageI
       categorical: [{ 300: color }],
       border: { base: color },
     },
-    data: { session: { message: { list: () => messages } } },
+    data: {
+      session: { get: () => undefined, message: { list: () => messages } },
+      location: { default: () => ({ directory: "/tmp", workspaceID: "workspace" }) },
+    },
+    client: { vcs: { ignored: async () => ({ data: ignored }) } },
     ui: { panel: { open: () => true } },
     storage: {
       store: () => [history, () => {}],
@@ -134,6 +142,25 @@ test("marks a planning step as having no worktree diff", async () => {
       .find((line) => line.includes("Draft the todo"))
     // The step carries a `plan` marker so a step with no expected diff is visually separated.
     expect(row).toContain("plan")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("marks an ignored change as having no tracked diff", async () => {
+  // Steps default collapsed; expand the step that holds the change so its rows render.
+  const ctx = context({ m1: true }, messages, ["src/parser.ts"])
+  const app = await testRender(() => <TaskTree context={ctx} sessionID="session" />, { width: 60, height: 12 })
+
+  try {
+    // The ignored-path resource resolves on a microtask, so let it settle before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await app.waitForFrame((frame) => frame.includes("untracked"), { maxPasses: 50 })
+    const row = app
+      .captureCharFrame()
+      .split("\n")
+      .find((line) => line.includes("src/parser.ts"))
+    expect(row).toContain("untracked")
   } finally {
     app.renderer.destroy()
   }

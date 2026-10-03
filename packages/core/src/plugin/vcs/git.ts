@@ -98,6 +98,9 @@ function make(proc: AppProcess.Interface, input: { directory: string; worktree: 
           }),
       )
     }),
+    ignored: Effect.fn("VcsGit.ignored")(function* (paths: readonly string[]) {
+      return yield* ctx.git.ignored(ctx.directory, paths)
+    }),
     diff: Effect.fn("VcsGit.diff")(function* (mode: Mode, options?: DiffOptions) {
       const git = ctx.git
       if (mode === "working") {
@@ -175,14 +178,14 @@ const nuls = (text: string) => text.split("\0").filter(Boolean)
 
 function makeGit(proc: AppProcess.Interface) {
   const run = Effect.fnUntraced(
-    function* (args: string[], opts: { cwd: string; maxOutputBytes?: number }) {
+    function* (args: string[], opts: { cwd: string; maxOutputBytes?: number; stdin?: string }) {
       const result = yield* proc.run(
         ChildProcess.make(gitExecutable, [...cfg, ...args], {
           cwd: opts.cwd,
           extendEnv: true,
-          stdin: "ignore",
+          ...(opts.stdin === undefined ? { stdin: "ignore" } : {}),
         }),
-        { maxOutputBytes: opts.maxOutputBytes },
+        { stdin: opts.stdin, maxOutputBytes: opts.maxOutputBytes },
       )
       return {
         exitCode: result.exitCode,
@@ -341,6 +344,17 @@ function makeGit(proc: AppProcess.Interface) {
     })
   })
 
+  /** The subset of `paths` (Location-relative) that Git ignores. `check-ignore` exits 1 when none match. */
+  const ignored = Effect.fn("VcsGit.ignored")(function* (cwd: string, paths: readonly string[]) {
+    if (!paths.length) return []
+    const result = yield* run(["check-ignore", "--no-index", "--stdin", "-z"], {
+      cwd,
+      stdin: paths.join("\0") + "\0",
+    })
+    if (result.exitCode !== 0 && result.exitCode !== 1) return []
+    return nuls(result.text())
+  })
+
   const diff = Effect.fn("VcsGit.diffNames")(function* (cwd: string, ref: string, target?: string) {
     const result = yield* run(
       ["diff", "--no-ext-diff", "--no-renames", "--name-status", "-z", ref, ...(target ? [target] : []), "--", "."],
@@ -467,6 +481,7 @@ function makeGit(proc: AppProcess.Interface) {
     hasHead,
     mergeBase,
     status,
+    ignored,
     diff,
     stats,
     patch,

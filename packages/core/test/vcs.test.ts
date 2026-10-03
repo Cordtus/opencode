@@ -98,6 +98,7 @@ const provider = (input: Partial<VcsDefinition> = {}) =>
     info: () => Effect.succeed({ branch: { current: "feature", default: "main" } }),
     branches: () => Effect.succeed(["feature", "main"]),
     status: () => Effect.succeed([{ file: "file.txt", additions: 1, deletions: 0, status: "added" }]),
+    ignored: () => Effect.succeed(["build"]),
     diff: () => Effect.succeed([{ file: "file.txt", patch: "+hello", additions: 1, deletions: 0, status: "added" }]),
     ...input,
   }) satisfies VcsDefinition
@@ -136,6 +137,7 @@ describe("Vcs", () => {
         expect(yield* vcs.status()).toEqual([])
         expect(yield* vcs.diff("working")).toEqual([])
         expect(yield* vcs.diff("branch")).toEqual([])
+        expect(yield* vcs.ignored!(["file.txt"])).toEqual([])
       }).pipe(provide(directory)),
     ),
   )
@@ -156,6 +158,7 @@ describe("Vcs", () => {
         expect(yield* vcs.diff("working")).toEqual([
           { file: "file.txt", patch: "+hello", additions: 1, deletions: 0, status: "added" },
         ])
+        expect(yield* vcs.ignored!(["file.txt"])).toEqual(["build"])
 
         yield* registration.dispose
         expect(yield* vcs.info()).toEqual({ branch: {} })

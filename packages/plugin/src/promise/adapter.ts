@@ -511,6 +511,7 @@ export function fromPromise(plugin: Plugin) {
               list: adaptApiMethod(VcsEndpoints["vcs.branch.list"], host.vcs.branch.list),
             },
             status: adaptApiMethod(VcsEndpoints["vcs.status"], host.vcs.status),
+            ignored: adaptApiMethod(VcsEndpoints["vcs.ignored"], host.vcs.ignored),
             diff: adaptApiMethod(VcsEndpoints["vcs.diff"], host.vcs.diff),
             reload: () => run(host.vcs.reload()),
             transform: (callback) =>
