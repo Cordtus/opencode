@@ -136,3 +136,6 @@ See `dev-docs/local-development.md` (`opencode-local`).
   lines) and the panel's `PatchDiff` receives its scrollbox, so a change in a large file renders hunks and large added
   files virtualize rather than rendering the whole file. `splitPatchHunks` no longer stalls when a foreign line (a
   multi-file patch's `diff --git` header) reaches a single hunk slice.
+- 2026-10-03: The durable projection derives and writes once per debounce and never overlaps whole-store writes, and stores
+  a truncated reasoning preview, so a running task cannot pile synchronous read/serialize/write work on the main thread.
+  Separately, `@opentui` is bumped to 0.5.14 for the upstream resize memory leak (see the work-in-progress note).

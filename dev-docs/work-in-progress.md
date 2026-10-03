@@ -58,6 +58,19 @@ and the whole store is re-serialized on every ~600 ms flush and on every `fs.wat
 steps. It is not large today (1.8 MB / 919 steps), so it does not explain that OOM on its own; bounding it (truncate stored
 reasoning, cap retained steps/sessions) is a deliberate design change that needs sign-off before it lands.
 
+### Resize crash (2026-10-03)
+
+Resizing the TUI while a task ran froze it and drove memory into the tens of GB. Root cause is upstream in `@opentui`, not
+the fork: `CodeRenderable` text updates leaked the replaced text-buffer rope (~1.24 MB per 2000-line update), and resize
+reallocated every cell array. `@opentui` 0.5.13 released the rope ("release replaced text buffer ropes") and reuses buffers
+while cells fit ("resize buffers in place"); 0.5.14 also repaints after net-zero resize bursts. The fork pinned 0.5.12, so
+this bumps `@opentui/core|keymap|solid` to 0.5.14 (see `dev-docs/tui-changes-panel.md`). Verified by a direct guard:
+300 `CodeRenderable` text updates grew RSS ~390 MB on 0.5.12 and ~14 MB on 0.5.14.
+
+Separately, the changes `History` now derives and writes once per debounce and never overlaps whole-store writes, and
+truncates stored reasoning to a preview, so a running task cannot pile synchronous read/serialize/write work on the main
+thread.
+
 ## Open questions / decisions
 
 - The README edit is an uncommitted tracked change; the git working-tree fallback will show it only once it is a real
