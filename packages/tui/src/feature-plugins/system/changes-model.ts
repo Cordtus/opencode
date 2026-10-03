@@ -49,6 +49,15 @@ export type SessionPrompt = {
   steps: SessionStep[]
 }
 
+/**
+ * A step whose every change edits the Plan agent's document directory. A planning step has no
+ * worktree diff, unlike a step that changes code, so the tree and panel can distinguish the two
+ * and say why a diff is absent.
+ */
+export function isPlanStep(step: SessionStep) {
+  return step.changes.length > 0 && step.changes.every((change) => change.kind === "plan")
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return
   return value as Record<string, unknown>

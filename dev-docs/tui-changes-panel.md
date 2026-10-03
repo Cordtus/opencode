@@ -68,6 +68,11 @@ Read-only work can still update a plan, so a plan edit is the only change a read
 tree and detail header distinguish it from a code change. Detection matches the path convention, not a resolved directory,
 because the projection is client-side.
 
+A step whose changes are _all_ plan edits is a planning step: `isPlanStep` marks it, the tree dims its label and adds a
+`plan` marker, and the detail panel says the diff is not expected (plan documents live outside the worktree, so no snapshot
+diff includes them). A step that changes code is unmarked and expects a diff; when one cannot be resolved the panel says so
+plainly, without claiming a diff should have been there.
+
 ## Components
 
 - `feature-plugins/system/changes-model.ts` — pure `deriveHistory(messages)` and `mergeHistory(previous, next)`; change
@@ -139,3 +144,6 @@ See `dev-docs/local-development.md` (`opencode-local`).
 - 2026-10-03: The durable projection derives and writes once per debounce and never overlaps whole-store writes, and stores
   a truncated reasoning preview, so a running task cannot pile synchronous read/serialize/write work on the main thread.
   Separately, `@opentui` is bumped to 0.5.14 for the upstream resize memory leak (see the work-in-progress note).
+- 2026-10-03: Planning steps are visually separated from code steps. `isPlanStep` marks a step whose every change is a
+  plan-document edit; the tree dims its label and shows a `plan` marker, and the detail panel reports "No diff expected"
+  rather than a bare no-diff message.

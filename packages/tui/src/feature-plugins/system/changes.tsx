@@ -11,6 +11,7 @@ import { errorMessage } from "../../util/error"
 import {
   deriveHistory,
   diffPatch,
+  isPlanStep,
   legacyPatch,
   livePatch,
   mergeHistory,
@@ -176,7 +177,16 @@ export function TaskTree(props: { context: Plugin.Context; sessionID: string }) 
                               <text flexShrink={0} fg={statusColor(theme(), step().status)}>
                                 [{statusMark(step().status)}]
                               </text>
-                              <text flexGrow={1} wrapMode="word" fg={levelColor(theme(), 1)}>
+                              <Show when={isPlanStep(step())}>
+                                <text flexShrink={0} fg={theme().text.muted}>
+                                  plan
+                                </text>
+                              </Show>
+                              <text
+                                flexGrow={1}
+                                wrapMode="word"
+                                fg={isPlanStep(step()) ? theme().text.muted : levelColor(theme(), 1)}
+                              >
                                 {step().label}
                               </text>
                             </box>
@@ -413,7 +423,11 @@ export function ChangeDetail(props: { context: Plugin.Context; input: PanelInput
                   when={!patch.loading && patch()}
                   fallback={
                     <text fg={theme().text.muted}>
-                      {patch.loading ? "Loading diff…" : "No diff available for this change."}
+                      {patch.loading
+                        ? "Loading diff…"
+                        : value().change.kind === "plan"
+                          ? "No diff expected (plan document)."
+                          : "No diff available for this change."}
                     </text>
                   }
                 >

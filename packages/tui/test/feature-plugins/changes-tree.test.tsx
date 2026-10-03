@@ -39,11 +39,11 @@ const messages = [
   },
 ] as unknown as SessionMessageInfo[]
 
-function context(expanded: Record<string, boolean> = {}) {
+function context(expanded: Record<string, boolean> = {}, source: SessionMessageInfo[] = messages) {
   const color = RGBA.fromInts(200, 200, 200)
   const feedback = { base: color, muted: color }
   // Seed the accumulated history the tree renders from.
-  const history = { sessions: { session: deriveHistory(messages) } }
+  const history = { sessions: { session: deriveHistory(source) } }
   const [state, setState] = createStore<{ expanded: Record<string, boolean> }>({ expanded })
   return {
     theme: {
@@ -100,6 +100,40 @@ test("clicking a step arrow expands its changes", async () => {
     await app.mockMouse.click(2, row)
     await app.renderOnce()
     expect(app.captureCharFrame()).toContain("src/parser.ts")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("marks a planning step as having no worktree diff", async () => {
+  const plan = [
+    { id: "u1", type: "user", text: "Plan the work" },
+    {
+      id: "m1",
+      type: "assistant",
+      content: [
+        { id: "t", type: "text", text: "Draft the todo" },
+        {
+          id: "tool",
+          type: "tool",
+          name: "write",
+          state: { status: "completed", input: { path: ".opencode/plan/todo.md" }, metadata: {} },
+        },
+      ],
+      time: { created: 1, completed: 2 },
+    },
+  ] as unknown as SessionMessageInfo[]
+  const ctx = context({}, plan)
+  const app = await testRender(() => <TaskTree context={ctx} sessionID="session" />, { width: 60, height: 8 })
+
+  try {
+    await app.renderOnce()
+    const row = app
+      .captureCharFrame()
+      .split("\n")
+      .find((line) => line.includes("Draft the todo"))
+    // The step carries a `plan` marker so a step with no expected diff is visually separated.
+    expect(row).toContain("plan")
   } finally {
     app.renderer.destroy()
   }

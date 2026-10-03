@@ -3,6 +3,7 @@ import type { SessionMessageInfo } from "@opencode/client"
 import {
   deriveHistory,
   diffPatch,
+  isPlanStep,
   livePatch,
   matchesFile,
   mergeHistory,
@@ -293,6 +294,23 @@ describe("changes-model.mergeHistory", () => {
       merged[0].steps[0].changes.map((item) => [item.id, (item as PersistedChange).patch]),
     )
     expect(patches).toEqual({ "tool-edit:0": "@@ a @@", "tool-write:0": undefined })
+  })
+})
+
+describe("changes-model.isPlanStep", () => {
+  test("is true only when every change edits the plan directory", () => {
+    const step = (files: string[]) =>
+      deriveHistory([
+        user("u1", "Plan"),
+        assistant(
+          "m1",
+          files.map((file) => tool("write", {}, { path: file })),
+        ),
+      ])[0].steps[0]
+
+    expect(isPlanStep(step([".opencode/plan/todo.md"]))).toBe(true)
+    expect(isPlanStep(step(["src/a.ts"]))).toBe(false)
+    expect(isPlanStep(step([".opencode/plan/todo.md", "src/a.ts"]))).toBe(false)
   })
 })
 

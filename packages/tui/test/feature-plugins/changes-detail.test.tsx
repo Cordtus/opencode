@@ -211,3 +211,20 @@ test("a legacy stored patch is shown without calling the step endpoint", async (
     app.renderer.destroy()
   }
 })
+
+test("says a plan document has no expected diff instead of a bare no-diff message", async () => {
+  const ctx = context(async () => [], {
+    id: "tool:0",
+    file: ".opencode/plan/todo.md",
+    additions: 1,
+    deletions: 1,
+    messageID: "m1",
+    kind: "plan",
+  })
+  const app = await render(ctx)
+  try {
+    await app.waitForFrame((frame) => frame.includes("No diff expected"))
+  } finally {
+    app.renderer.destroy()
+  }
+})
