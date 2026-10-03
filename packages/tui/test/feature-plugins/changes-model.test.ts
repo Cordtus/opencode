@@ -3,7 +3,6 @@ import type { SessionMessageInfo } from "@opencode/client"
 import {
   deriveHistory,
   diffPatch,
-  legacyPatch,
   livePatch,
   matchesFile,
   mergeHistory,

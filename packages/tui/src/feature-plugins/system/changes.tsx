@@ -8,7 +8,6 @@ import { useThemes } from "../../context/theme"
 import { PatchDiff } from "../../component/patch-diff"
 import { filetype } from "../../util/filetype"
 import { errorMessage } from "../../util/error"
-import { toolDisplayMetadata } from "../../util/tool-display"
 import {
   deriveHistory,
   diffPatch,

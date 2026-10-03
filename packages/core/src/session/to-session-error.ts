@@ -1,4 +1,4 @@
-import { AIError, ToolFailure } from "@opencode/ai"
+import { AIError, ToolFailure, type FinishReasonDetails } from "@opencode/ai"
 import { Tool } from "@opencode/schema/tool"
 import { SessionError } from "@opencode/schema/session-error"
 import { Permission } from "../permission.js"
@@ -11,7 +11,7 @@ const tokenSharingMessages = {
   subscription_sharing_user_not_eligible:
     "ChatGPT token sharing isn't available for this account. Connect with an API key or choose another provider.",
   subscription_sharing_usage_limit_exceeded:
-    "ChatGPT usage limit reached. Try again after your allowance resets; check ChatGPT Settings → Usage for details.",
+    "ChatGPT usage limit reached. Check ChatGPT Settings → Usage for details.",
   subscription_sharing_usage_unavailable: "ChatGPT usage can't be checked right now. Try again later.",
   subscription_sharing_unsupported_capability:
     "This request uses a feature ChatGPT token sharing doesn't support. Remove the unsupported feature and try again.",
@@ -83,6 +83,15 @@ export function toSessionError(cause: unknown): SessionError.Error {
     return { type: "provider.no-route", message: cause.message }
   if (cause instanceof Integration.AuthorizationError) return { type: "provider.auth", message: cause.message }
   return { type: "unknown", message: cause instanceof Error ? cause.message : String(cause) }
+}
+
+export function contentFilterError(summary: string, reason: FinishReasonDetails): SessionError.Error {
+  return {
+    type: "provider.content-filter",
+    message: [reason.category === undefined ? summary : `${summary} (${reason.category})`, reason.explanation]
+      .filter(Boolean)
+      .join(": "),
+  }
 }
 
 function providerError(type: string, reason: AIError["reason"]): SessionError.Error {
