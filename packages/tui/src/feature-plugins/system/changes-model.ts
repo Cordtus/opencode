@@ -68,6 +68,13 @@ function truncate(value: string, length = 72) {
   return value.length > length ? `${value.slice(0, length - 1)}…` : value
 }
 
+// The durable history keeps every change-bearing step, so a step's reasoning is stored as a
+// bounded preview instead of the full streamed text.
+const REASONING_LIMIT = 4_000
+function truncateReasoning(value: string) {
+  return truncate(value, REASONING_LIMIT)
+}
+
 function firstLine(value: string) {
   return value
     .split("\n")
@@ -224,10 +231,12 @@ export function deriveHistory(messages: SessionMessageInfo[]): SessionPrompt[] {
     // A step with no file-producing change is not a change: it would only add an inert,
     // unexpandable row. Keep the tree to steps that actually produced something.
     if (changes.length === 0) continue
-    const reasoning = message.content
-      .flatMap((part) => (part.type === "reasoning" ? [part.text] : []))
-      .filter(Boolean)
-      .join("\n\n")
+    const reasoning = truncateReasoning(
+      message.content
+        .flatMap((part) => (part.type === "reasoning" ? [part.text] : []))
+        .filter(Boolean)
+        .join("\n\n"),
+    )
 
     stepIndex++
     ensurePrompt().steps.push({

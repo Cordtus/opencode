@@ -61,39 +61,54 @@ function statusColor(theme: Plugin.Context["theme"], status: "running" | "error"
 }
 
 /**
- * Accumulates `deriveHistory` output into durable storage. Debounced because reasoning
- * streams token-by-token; the union-merge means evicted messages stay in the tree.
+ * Accumulates `deriveHistory` output into durable storage. The transcript is only tracked so a
+ * change schedules a projection: deriving and writing happen once per debounce rather than once
+ * per streamed token, and writes never overlap. Without that, a running task makes the
+ * whole-store read/serialize/write (and the watcher reload it triggers) pile up on the main
+ * thread. The union-merge means evicted messages stay in the tree.
  */
 function History(props: { context: Plugin.Context }) {
   const history = props.context.storage.store<HistoryStore>("history", HistoryStoreOptions)
   const update = history[1]
   let timer: ReturnType<typeof setTimeout> | undefined
-  let pending: { sessionID: string; prompts: SessionPrompt[] } | undefined
+  let running = false
+  let dirty: string | undefined
 
-  const flush = () => {
-    if (!pending) return
-    const { sessionID, prompts } = pending
-    pending = undefined
-    void update((draft) => {
-      draft.sessions[sessionID] = mergeHistory(draft.sessions[sessionID], prompts)
-    }).catch(() => {})
+  const schedule = () => {
+    if (timer || running) return
+    timer = setTimeout(() => {
+      timer = undefined
+      void flush()
+    }, 600)
+  }
+  const flush = async () => {
+    if (running || !dirty) return
+    const sessionID = dirty
+    dirty = undefined
+    const prompts = deriveHistory(props.context.data.session.message.list(sessionID))
+    if (!prompts.length) return
+    running = true
+    try {
+      await update((draft) => {
+        draft.sessions[sessionID] = mergeHistory(draft.sessions[sessionID], prompts)
+      })
+    } catch {
+      // A failed write is retried by the next scheduled flush; keep the panel usable.
+    }
+    running = false
+    if (dirty) schedule()
   }
   createEffect(() => {
     const route = props.context.ui.router.current()
     if (route.type !== "session") return
-    const prompts = deriveHistory(props.context.data.session.message.list(route.sessionID))
-    if (!prompts.length) return
-    pending = { sessionID: route.sessionID, prompts }
-    if (!timer) {
-      timer = setTimeout(() => {
-        timer = undefined
-        flush()
-      }, 600)
-    }
+    const messages = props.context.data.session.message.list(route.sessionID)
+    if (!messages.length) return
+    dirty = route.sessionID
+    schedule()
   })
   onCleanup(() => {
     if (timer) clearTimeout(timer)
-    flush()
+    void flush()
   })
   return null
 }
